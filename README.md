@@ -12,7 +12,7 @@ Chaque navigateur est un **adapter** derrière une interface commune : en ajoute
 
 ```bash
 npm install                                   # installe aussi Chrome for Testing (Puppeteer)
-npx playwright install chromium firefox webkit
+npm run install-browsers                      # Chromium, Firefox et WebKit de Playwright
 npm run list                                  # navigateurs disponibles + cibles
 npm run bench -- --browsers=all --targets=local --runs=3
 ```
@@ -27,6 +27,7 @@ npm run bench -- --browsers=puppeteer,lightpanda --targets=antibot --runs=5
 npm run aggregate     # reconstruit results/aggregated.json depuis results/raw
 npm run dashboard     # régénère dashboard/index.html depuis results/aggregated.json
 npm run list          # disponibilité des navigateurs et liste des cibles
+npm run install-browsers  # installe les navigateurs Playwright (respecte PLAYWRIGHT_BROWSERS_PATH)
 npm test              # tests unitaires
 npm run typecheck
 ```
@@ -42,6 +43,8 @@ npm run typecheck
 | `--config` | `config/targets.json` | fichier de cibles |
 | `--results` | `results` | dossier des résultats |
 | `--clean` | non | supprime les résultats bruts précédents avant la campagne |
+
+**Configuration locale** : les variables d'environnement peuvent aussi être placées dans un fichier `.env` à la racine (ignoré par git, voir [`.env.example`](.env.example)). Il est chargé par chaque commande `npm run`. Variables utiles : `PLAYWRIGHT_BROWSERS_PATH` et `LIGHTPANDA_*`.
 
 Sans `--clean`, les résultats bruts s'accumulent : on peut lancer Lightpanda un jour et Puppeteer le lendemain, l'agrégation couvre tout. Un run relancé écrase le fichier du même `{browser}_{target}_{run}`.
 
@@ -207,7 +210,7 @@ Rien d'autre à modifier : le runner, le monitoring, l'agrégation et le dashboa
 
 ## Dépannage
 
-- **`playwright-firefox` échoue avec `spawn UNKNOWN`** sur certaines builds de Windows 11 : Windows refuse de démarrer `firefox.exe` (« Assembly dépendant mozglue introuvable » dans l'Observateur d'événements). Le binaire téléchargé est complet ; le problème vient de la compatibilité entre le build Firefox de Playwright et ce Windows. Les runs sont comptés en échec sans bloquer la campagne.
+- **`playwright-firefox` échoue avec `spawn UNKNOWN`** (Windows ; l'Observateur d'événements indique « Assembly dépendant mozglue introuvable »). Les navigateurs Playwright ont été installés depuis une **application Windows empaquetée** (MSIX), par exemple le terminal de l'app de bureau Claude. Ces applications redirigent `AppData` vers leur propre cache (`AppData\Local\Packages\<app>\LocalCache`), et le chargeur de Windows ne retrouve pas la DLL `mozglue` de Firefox à travers cette redirection. Chromium et WebKit ne sont pas concernés. Solution : installer les navigateurs hors d'`AppData`, en ajoutant par exemple `PLAYWRIGHT_BROWSERS_PATH=C:/Users/<vous>/.cache/ms-playwright` dans `.env`, puis `npm run install-browsers`.
 - **Selenium** : Selenium Manager résout (et télécharge si besoin) chromedriver et Chrome au premier lancement. Ce délai n'est pas compté dans le temps de lancement.
 
 ## Hors scope v1
