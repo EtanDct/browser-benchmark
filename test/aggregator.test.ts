@@ -63,8 +63,8 @@ describe('aggregate', () => {
   });
 
   it('counts failed page loads as failed anti-bot attempts', () => {
-    const passed = { antiBot: { outcome: 'passed' as const, passed: true, detail: '' } };
-    const challenged = { antiBot: { outcome: 'challenge' as const, passed: false, detail: '' } };
+    const passed = { antiBot: { outcome: 'passed' as const, passed: true, detail: '', score: 1 } };
+    const challenged = { antiBot: { outcome: 'challenge' as const, passed: false, detail: '', score: 0.5 } };
     const report = aggregate([
       record('a', 'cf', 1, passed, 'antibot'),
       record('a', 'cf', 2, challenged, 'antibot'),
@@ -73,6 +73,7 @@ describe('aggregate', () => {
     const cell = report.cells[0];
     assert.equal(cell.antiBot?.evaluated, 3);
     assert.equal(cell.antiBot?.passed, 1);
+    assert.equal(cell.antiBot?.meanScore, 0.5);
     assert.deepEqual(cell.antiBot?.outcomes, { passed: 1, challenge: 1 });
     assert.equal(report.browserSummaries[0].antiBotPassRate, 1 / 3);
     assert.deepEqual(cell.errors, ['timeout']);

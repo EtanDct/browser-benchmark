@@ -39,7 +39,14 @@ export interface Cell {
   memPeakMB: Stats | null;
   cpuAvgPercent: Stats | null;
   cpuPeakPercent: Stats | null;
-  antiBot: { evaluated: number; passed: number; passRate: number; outcomes: Partial<Record<AntiBotOutcome, number>> } | null;
+  antiBot: {
+    evaluated: number;
+    passed: number;
+    passRate: number;
+    /** Mean graded stealth score (0-1); runs that never got a page count as 0. */
+    meanScore: number;
+    outcomes: Partial<Record<AntiBotOutcome, number>>;
+  } | null;
   fidelity: {
     /** Share of this browser's successful runs whose DOM structure hash equals the cross-browser consensus. */
     matchRate: number;
@@ -143,6 +150,8 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
     const outcomes: Partial<Record<AntiBotOutcome, number>> = {};
     for (const r of antiBotRuns) outcomes[r.navigation.antiBot!.outcome] = (outcomes[r.navigation.antiBot!.outcome] ?? 0) + 1;
     const passed = antiBotRuns.filter((r) => r.navigation.antiBot!.passed).length;
+    // Records written before graded scores existed only carry pass/fail.
+    const scoreSum = antiBotRuns.reduce((sum, r) => sum + (r.navigation.antiBot!.score ?? (r.navigation.antiBot!.passed ? 1 : 0)), 0);
     // A run that never got a page counts as a failed anti-bot attempt for antibot targets.
     const antiBotAttempts = runs.some((r) => r.targetGroup === 'antibot') || antiBotRuns.length ? runs.length : 0;
 
@@ -167,7 +176,7 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
       cpuAvgPercent: computeStats(summaries.flatMap((s) => (s.cpuPercent ? [s.cpuPercent.avg] : []))),
       cpuPeakPercent: computeStats(summaries.flatMap((s) => (s.cpuPercent ? [s.cpuPercent.max] : []))),
       antiBot: antiBotAttempts
-        ? { evaluated: antiBotAttempts, passed, passRate: passed / antiBotAttempts, outcomes }
+        ? { evaluated: antiBotAttempts, passed, passRate: passed / antiBotAttempts, meanScore: Math.round((scoreSum / antiBotAttempts) * 1000) / 1000, outcomes }
         : null,
       fidelity: hashed.length && consensus.hash
         ? {

@@ -160,7 +160,26 @@ Pour chaque run (1 navigateur × 1 cible × 1 itération), un fichier `results/r
 
 ## Dashboard
 
-`dashboard/index.html` est un fichier unique, avec les données embarquées et Chart.js chargé depuis un CDN :
+`dashboard/index.html` est un fichier unique, avec les données embarquées et Chart.js chargé depuis un CDN. Il a deux onglets, qui partagent les mêmes filtres.
+
+**Classement** : croise tous les navigateurs pour désigner le meilleur.
+
+- 7 axes notés sur 100 :
+
+  | Axe | Mesure | Calcul |
+  |---|---|---|
+  | Anti-bot | score de discrétion gradué | absolu : part des contrôles de détection passés (sannysoft), 100 − score headless/stealth (CreepJS), part des signaux non déclenchés (deviceandbrowserinfo), 1/0 ailleurs |
+  | Vitesse | temps de chargement médian | relatif, cible par cible : meilleur / valeur (2× plus lent = 50) |
+  | Démarrage | temps de lancement | relatif |
+  | Mémoire | mémoire moyenne | relatif |
+  | CPU | CPU moyen | relatif, +5 points de chaque côté pour ne pas écraser le classement sur les pages quasi inactives |
+  | Fidélité | DOM identique au consensus | absolu |
+  | Fiabilité | runs réussis | absolu |
+
+- score global = moyenne pondérée des axes. Les pondérations (0 à 5) se règlent avec des curseurs ou des préréglages : *Équilibré*, *Scraping discret*, *Performance / volume*, *Rendu fidèle*. Elles sont mémorisées dans le navigateur ;
+- carte du gagnant (score, dauphins, meilleur navigateur par axe) et matrice navigateurs × axes colorée selon le score, avec la valeur mesurée dans chaque case.
+
+**Détails** :
 
 - tableau de synthèse par navigateur ;
 - matrice anti-bot navigateur × cible, avec code couleur et icône (✓ ≥ 80 %, ! 40–80 %, ✕ < 40 %) ;

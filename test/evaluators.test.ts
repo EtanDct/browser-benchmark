@@ -57,9 +57,10 @@ describe('sannysoft evaluator', () => {
   });
 
   it('reports detection when a check failed', () => {
-    const verdict = evaluateAntiBot(rule, page({ html: row('passed') + row('failed') }));
+    const verdict = evaluateAntiBot(rule, page({ html: row('passed') + row('passed') + row('passed') + row('failed') }));
     assert.equal(verdict.outcome, 'detected');
     assert.equal(verdict.passed, false);
+    assert.equal(verdict.score, 0.75);
   });
 
   it('is unknown when the result table is missing', () => {
@@ -75,6 +76,7 @@ describe('deviceandbrowserinfo evaluator', () => {
     const verdict = evaluateAntiBot(rule, page({ text }));
     assert.equal(verdict.outcome, 'detected');
     assert.equal(verdict.detail, 'isBot: true (hasBotUserAgent, isAutomatedWithCDP)');
+    assert.equal(verdict.score, 0.333);
   });
 
   it('passes on isBot false and waits when the verdict is not computed yet', () => {
@@ -92,7 +94,10 @@ describe('creepjs evaluator', () => {
     const verdict = evaluateAntiBot(rule, page({ html: ratings(100, 38, 0) }));
     assert.equal(verdict.outcome, 'detected');
     assert.equal(verdict.detail, 'headless 100%, like-headless 38%, stealth 0%');
-    assert.equal(evaluateAntiBot(rule, page({ html: ratings(0, 20, 40) })).outcome, 'detected');
+    assert.equal(verdict.score, 0);
+    const stealthy = evaluateAntiBot(rule, page({ html: ratings(0, 20, 40) }));
+    assert.equal(stealthy.outcome, 'detected');
+    assert.equal(stealthy.score, 0.6);
   });
 
   it('passes with no headless nor stealth signal, unknown before rendering', () => {

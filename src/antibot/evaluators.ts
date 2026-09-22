@@ -25,6 +25,11 @@ export interface AntiBotVerdict {
   outcome: AntiBotOutcome;
   passed: boolean;
   detail: string;
+  /**
+   * Graded stealth, 0 (fully flagged) to 1 (undetected): share of fingerprint checks passed where the
+   * page exposes them, else 1 for a pass and 0 otherwise. Lets browsers be ranked even when none passes.
+   */
+  score: number;
   /** Time spent after `load` waiting for a challenge to clear or a verdict to appear. */
   resolveMs?: number;
   /** Start of the page's visible text, to see what was actually served when there is no clear verdict. */
@@ -44,8 +49,9 @@ const CLOUDFLARE_CHALLENGE_TITLES = [/just a moment/i, /un instant/i, /checking 
 const CLOUDFLARE_CHALLENGE_MARKERS = ['_cf_chl_opt', 'cf-browser-verification', 'id="challenge-form"', 'cf-challenge-running'];
 const CLOUDFLARE_BLOCK_TEXTS = ['sorry, you have been blocked', 'you are unable to access', 'error 1020', 'access denied'];
 
-function verdict(outcome: AntiBotOutcome, detail: string): AntiBotVerdict {
-  return { outcome, passed: outcome === 'passed', detail };
+function verdict(outcome: AntiBotOutcome, detail: string, score?: number): AntiBotVerdict {
+  const passed = outcome === 'passed';
+  return { outcome, passed, detail, score: Math.round((score ?? (passed ? 1 : 0)) * 1000) / 1000 };
 }
 
 function applyTextRules(rule: AntiBotRule, evidence: PageEvidence): AntiBotVerdict | null {
@@ -85,7 +91,8 @@ function evaluateSannysoft(rule: AntiBotRule, evidence: PageEvidence): AntiBotVe
   }
   const detail = `${counts.passed} passed, ${counts.warn} warn, ${counts.failed} failed`;
   if (counts.passed + counts.failed + counts.warn === 0) return verdict('unknown', 'no fingerprint check results found');
-  return applyTextRules(rule, evidence) ?? verdict(counts.failed === 0 ? 'passed' : 'detected', detail);
+  const score = (counts.passed + counts.warn / 2) / (counts.passed + counts.warn + counts.failed);
+  return applyTextRules(rule, evidence) ?? verdict(counts.failed === 0 ? 'passed' : 'detected', detail, score);
 }
 
 /**
@@ -95,9 +102,11 @@ function evaluateSannysoft(rule: AntiBotRule, evidence: PageEvidence): AntiBotVe
 function evaluateDeviceAndBrowserInfo(_rule: AntiBotRule, evidence: PageEvidence): AntiBotVerdict {
   const isBot = /"isBot"\s*:\s*(true|false)/.exec(evidence.text)?.[1];
   if (!isBot) return verdict('unknown', 'no isBot verdict displayed: the detection script did not complete in this browser');
-  const signals = [...evidence.text.matchAll(/"(\w+)"\s*:\s*true/g)].map((m) => m[1]).filter((name) => name !== 'isBot');
+  const flags = [...evidence.text.matchAll(/"(\w+)"\s*:\s*(true|false)/g)].filter((m) => m[1] !== 'isBot');
+  const signals = flags.filter((m) => m[2] === 'true').map((m) => m[1]);
   if (isBot === 'false') return verdict('passed', 'isBot: false');
-  return verdict('detected', signals.length ? `isBot: true (${signals.join(', ')})` : 'isBot: true');
+  const score = flags.length ? 1 - signals.length / flags.length : 0;
+  return verdict('detected', signals.length ? `isBot: true (${signals.join(', ')})` : 'isBot: true', score);
 }
 
 /** CreepJS renders three ratings: "headless" and "stealth" (lies/patches) must both be 0%. */
@@ -111,7 +120,7 @@ function evaluateCreepJs(_rule: AntiBotRule, evidence: PageEvidence): AntiBotVer
   const stealth = rating('stealth');
   if (headless === undefined || stealth === undefined) return verdict('unknown', 'ratings never rendered: the fingerprinting script did not complete in this browser');
   const detail = `headless ${headless}%, like-headless ${likeHeadless ?? '?'}%, stealth ${stealth}%`;
-  return verdict(headless === 0 && stealth === 0 ? 'passed' : 'detected', detail);
+  return verdict(headless === 0 && stealth === 0 ? 'passed' : 'detected', detail, 1 - Math.max(headless, stealth) / 100);
 }
 
 function evaluateGeneric(rule: AntiBotRule, evidence: PageEvidence): AntiBotVerdict {

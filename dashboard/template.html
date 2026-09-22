@@ -28,6 +28,8 @@
   --status-good: #0ca30c;
   --status-warning: #fab219;
   --status-critical: #d03b3b;
+  --scale-max: #184f95;
+  --scale-ink-strong: #ffffff;
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
@@ -48,6 +50,8 @@
     --series-6: #008300;
     --series-7: #9085e9;
     --series-8: #e66767;
+    --scale-max: #6da7ec;
+    --scale-ink-strong: #0b0b0b;
   }
 }
 :root[data-theme="dark"] {
@@ -68,6 +72,8 @@
   --series-6: #008300;
   --series-7: #9085e9;
   --series-8: #e66767;
+  --scale-max: #6da7ec;
+  --scale-ink-strong: #0b0b0b;
 }
 
 * { box-sizing: border-box; }
@@ -133,6 +139,52 @@ select {
   border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px;
 }
 .empty { color: var(--text-muted); padding: 32px 0; text-align: center; }
+
+.tabs { display: flex; gap: 4px; margin-top: 20px; border-bottom: 1px solid var(--grid); }
+.tabs button {
+  font: inherit; font-weight: 600; color: var(--text-secondary); background: none; border: 0;
+  padding: 8px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer;
+}
+.tabs button[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--series-1); }
+.tabs button:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; border-radius: 4px; }
+
+.ranking-top { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 0 16px; }
+.ranking-top > section { display: flex; flex-direction: column; }
+.ranking-top .card { flex: 1; }
+.winner-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.winner-name { font-size: 24px; font-weight: 700; display: inline-flex; align-items: center; gap: 10px; }
+.winner-name .swatch { width: 14px; height: 14px; }
+.winner-score { font-size: 24px; font-weight: 600; color: var(--text-secondary); }
+.winner-score small { font-size: 14px; font-weight: 400; }
+.winner-sub { color: var(--text-secondary); margin: 4px 0 14px; }
+.axis-winners { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px 16px; margin: 0; padding: 0; list-style: none; }
+.axis-winners li { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.axis-winners .axis { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+
+.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.presets button {
+  font: inherit; font-size: 13px; color: var(--text-primary); background: none; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 999px; padding: 3px 12px;
+}
+.presets button[aria-pressed="true"] { border-color: var(--series-1); color: var(--series-1); font-weight: 600; }
+.weights { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 20px; }
+.weights label { display: grid; grid-template-columns: 90px 1fr 18px; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
+.weights input[type="range"] { width: 100%; accent-color: var(--series-1); }
+.weights output { color: var(--text-primary); font-variant-numeric: tabular-nums; text-align: right; }
+
+table.ranking td.score { text-align: center; padding: 6px 8px; min-width: 88px; border-bottom: 2px solid var(--surface-1); }
+table.ranking td.score .v { display: block; font-size: 15px; font-weight: 600; }
+table.ranking td.score .raw { display: block; font-size: 11px; opacity: .85; }
+table.ranking td.score.best .v::after { content: " ★"; font-size: 12px; }
+table.ranking th.axis { text-align: center; }
+table.ranking td:nth-child(2), table.ranking th:nth-child(2) { text-align: left; }
+table.ranking td.rank { color: var(--text-muted); width: 28px; }
+table.ranking tr.first td { font-weight: 600; }
+.global { display: flex; align-items: center; gap: 8px; min-width: 150px; }
+.global .bar { flex: 1; height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; }
+.global .bar span { display: block; height: 100%; background: var(--series-1); border-radius: 4px; }
+.global b { width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+.note { margin-top: 10px; }
 footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 </style>
 </head>
@@ -143,11 +195,42 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     <div class="meta" id="meta"></div>
   </header>
 
+  <nav class="tabs" role="tablist" aria-label="Vues">
+    <button type="button" role="tab" id="tab-ranking" aria-controls="view-ranking" aria-selected="true">Classement</button>
+    <button type="button" role="tab" id="tab-details" aria-controls="view-details" aria-selected="false">Détails</button>
+  </nav>
+
   <div class="filters" role="group" aria-label="Filtres">
     <div class="filter-group" id="browser-filters"><span class="label">Navigateurs</span></div>
     <div class="filter-group" id="target-filters"><span class="label">Cibles</span></div>
   </div>
 
+  <div id="view-ranking" role="tabpanel" aria-labelledby="tab-ranking">
+    <div class="ranking-top">
+      <section>
+        <h2>Meilleur navigateur</h2>
+        <p class="hint">Selon les pondérations choisies, sur les navigateurs et cibles sélectionnés.</p>
+        <div class="card" id="winner"></div>
+      </section>
+      <section>
+        <h2>Pondérations</h2>
+        <p class="hint">Ce qui compte pour ton usage. Le classement se met à jour en direct.</p>
+        <div class="card">
+          <div class="presets" id="presets" role="group" aria-label="Préréglages"></div>
+          <div class="weights" id="weights"></div>
+        </div>
+      </section>
+    </div>
+
+    <section>
+      <h2>Comparaison croisée</h2>
+      <p class="hint">Chaque case est un score sur 100 (plus foncé = meilleur), avec la valeur mesurée en dessous. Performance (vitesse, démarrage, mémoire, CPU) : score relatif au meilleur navigateur, cible par cible (2× plus lent que le meilleur = 50), puis moyenné sur les cibles. Anti-bot, fidélité et fiabilité : taux absolus. Survoler une case pour le détail.</p>
+      <div class="card table-wrap"><table id="ranking-table" class="ranking"></table></div>
+      <p class="hint note" id="ranking-notes"></p>
+    </section>
+  </div>
+
+  <div id="view-details" role="tabpanel" aria-labelledby="tab-details" hidden>
   <section>
     <h2>Vue d'ensemble</h2>
     <p class="hint">Agrégé sur les cibles sélectionnées. Temps de chargement = moyenne des médianes par cible ; mémoire = <span id="mem-metric"></span>, somme sur tout l'arbre de process.</p>
@@ -204,6 +287,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     <p class="hint">Fidélité = part des runs dont la structure DOM (hash de la séquence de balises) est identique au consensus inter-navigateurs pour cette cible.</p>
     <div class="card table-wrap"><table id="detail-table"></table></div>
   </section>
+  </div>
 
   <footer id="footer"></footer>
 </main>
@@ -574,7 +658,260 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     renderDrillCharts(cell);
   });
 
+  // ---------- ranking ----------
+  // relative axes: per target, score = best / value (lower is better), then averaged over targets.
+  // absolute axes: rates already on a 0-1 scale.
+  var AXES = [
+    { key: 'antibot', label: 'Anti-bot', kind: 'absolute', help: 'discrétion moyenne face aux pages de détection (part des contrôles passés)',
+      value: function (c) { return c.antiBot ? (typeof c.antiBot.meanScore === 'number' ? c.antiBot.meanScore : c.antiBot.passRate) : null; },
+      raw: function (v) { return fmt(v * 100, 0, ' % discret'); } },
+    { key: 'speed', label: 'Vitesse', kind: 'relative', help: 'temps de chargement médian (début de navigation → load)',
+      value: function (c) { return c.loadTimeMs ? c.loadTimeMs.median : null; },
+      raw: function (v) { return fmt(v, 0, ' ms'); } },
+    { key: 'launch', label: 'Démarrage', kind: 'relative', help: 'temps de lancement du navigateur',
+      value: function (c) { return c.launchTimeMs ? c.launchTimeMs.median : null; },
+      raw: function (v) { return fmt(v, 0, ' ms'); } },
+    { key: 'memory', label: 'Mémoire', kind: 'relative', help: 'mémoire moyenne pendant le run',
+      value: function (c) { return c.memAvgMB ? c.memAvgMB.mean : null; },
+      raw: function (v) { return fmt(v, 0, ' Mo'); } },
+    // +5 points of CPU on both sides so a near-idle 0-1 % browser does not crush everyone else to 0.
+    { key: 'cpu', label: 'CPU', kind: 'relative', epsilon: 5, help: 'CPU moyen, en % d’un cœur',
+      value: function (c) { return c.cpuAvgPercent ? c.cpuAvgPercent.mean : null; },
+      raw: function (v) { return fmt(v, 0, ' %'); } },
+    { key: 'fidelity', label: 'Fidélité', kind: 'absolute', help: 'part des runs dont le DOM est identique au consensus inter-navigateurs',
+      value: function (c) { return c.fidelity ? c.fidelity.matchRate : null; },
+      raw: function (v) { return pct(v) + ' identique'; } },
+    { key: 'reliability', label: 'Fiabilité', kind: 'absolute', help: 'part des runs réussis (chargement + capture)',
+      value: function (c) { return c.successRate; },
+      raw: function (v) { return pct(v) + ' réussis'; } }
+  ];
+
+  var PRESETS = [
+    { id: 'balanced', label: 'Équilibré', weights: { antibot: 1, speed: 1, launch: 1, memory: 1, cpu: 1, fidelity: 1, reliability: 1 } },
+    { id: 'stealth', label: 'Scraping discret', weights: { antibot: 5, speed: 1, launch: 0, memory: 1, cpu: 1, fidelity: 2, reliability: 3 } },
+    { id: 'volume', label: 'Performance / volume', weights: { antibot: 0, speed: 3, launch: 2, memory: 3, cpu: 2, fidelity: 1, reliability: 2 } },
+    { id: 'rendering', label: 'Rendu fidèle', weights: { antibot: 0, speed: 1, launch: 0, memory: 1, cpu: 1, fidelity: 5, reliability: 3 } }
+  ];
+
+  var weights = Object.assign({}, PRESETS[0].weights);
+  try {
+    var savedWeights = JSON.parse(localStorage.getItem('bench-weights') || 'null');
+    if (savedWeights) AXES.forEach(function (a) { if (typeof savedWeights[a.key] === 'number') weights[a.key] = savedWeights[a.key]; });
+  } catch (e) { /* storage unavailable: defaults */ }
+
+  function computeRanking() {
+    var cells = visibleCells();
+    var browsers = visibleBrowsers().filter(function (b) { return cells.some(function (c) { return c.browser === b; }); });
+    var targets = [];
+    cells.forEach(function (c) { if (targets.indexOf(c.target) < 0) targets.push(c.target); });
+    var rows = browsers.map(function (b) { return { browser: b, score: {}, raw: {}, targets: {} }; });
+
+    AXES.forEach(function (axis) {
+      var acc = {};
+      browsers.forEach(function (b) { acc[b] = { scores: [], raws: [] }; });
+      targets.forEach(function (t) {
+        var entries = [];
+        browsers.forEach(function (b) {
+          var cell = cells.find(function (c) { return c.browser === b && c.target === t; });
+          var v = cell ? axis.value(cell) : null;
+          if (typeof v === 'number' && isFinite(v)) entries.push({ browser: b, v: v });
+        });
+        if (axis.kind === 'relative') {
+          if (entries.length < 2) return;
+          var eps = axis.epsilon || 0;
+          var best = Math.min.apply(null, entries.map(function (e) { return e.v; }));
+          entries.forEach(function (e) { acc[e.browser].scores.push((best + eps) / (e.v + eps)); acc[e.browser].raws.push(e.v); });
+        } else {
+          entries.forEach(function (e) { acc[e.browser].scores.push(e.v); acc[e.browser].raws.push(e.v); });
+        }
+      });
+      rows.forEach(function (r) {
+        var a = acc[r.browser];
+        r.score[axis.key] = a.scores.length ? 100 * mean(a.scores) : null;
+        r.raw[axis.key] = a.raws.length ? mean(a.raws) : null;
+        r.targets[axis.key] = a.scores.length;
+      });
+    });
+
+    rows.forEach(function (r) {
+      var sum = 0, total = 0;
+      AXES.forEach(function (a) {
+        if (r.score[a.key] === null || !weights[a.key]) return;
+        sum += r.score[a.key] * weights[a.key];
+        total += weights[a.key];
+      });
+      r.total = total ? sum / total : null;
+    });
+    rows.sort(function (a, b) { return (b.total === null ? -1 : b.total) - (a.total === null ? -1 : a.total); });
+    return { rows: rows, targets: targets, cells: cells };
+  }
+
+  function bestPerAxis(rows) {
+    var best = {};
+    AXES.forEach(function (a) {
+      var top = null;
+      rows.forEach(function (r) { if (r.score[a.key] !== null && (top === null || r.score[a.key] > top.score[a.key] + 1e-9)) top = r; });
+      if (top && rows.filter(function (r) { return r.score[a.key] !== null && Math.abs(r.score[a.key] - top.score[a.key]) < 0.5; }).length === 1) best[a.key] = top.browser;
+      else if (top) best[a.key] = null; // tie: nobody gets the star
+    });
+    return best;
+  }
+
+  function renderWeights() {
+    var presets = document.getElementById('presets');
+    var box = document.getElementById('weights');
+    PRESETS.forEach(function (p) {
+      var btn = el('button', { type: 'button', 'data-preset': p.id, text: p.label });
+      btn.addEventListener('click', function () {
+        weights = Object.assign({}, p.weights);
+        syncWeightInputs();
+        onWeightsChanged();
+      });
+      presets.appendChild(btn);
+    });
+    AXES.forEach(function (a) {
+      var input = el('input', { type: 'range', min: '0', max: '5', step: '1', id: 'w-' + a.key, 'aria-label': 'Poids ' + a.label });
+      var out = el('output', { for: 'w-' + a.key });
+      input.addEventListener('input', function () {
+        weights[a.key] = Number(input.value);
+        out.textContent = input.value;
+        onWeightsChanged();
+      });
+      box.appendChild(el('label', { title: a.help }, [a.label, input, out]));
+    });
+    syncWeightInputs();
+  }
+
+  function syncWeightInputs() {
+    AXES.forEach(function (a) {
+      var input = document.getElementById('w-' + a.key);
+      input.value = String(weights[a.key]);
+      input.nextSibling.textContent = String(weights[a.key]);
+    });
+    PRESETS.forEach(function (p) {
+      var same = AXES.every(function (a) { return p.weights[a.key] === weights[a.key]; });
+      document.querySelector('[data-preset="' + p.id + '"]').setAttribute('aria-pressed', same ? 'true' : 'false');
+    });
+  }
+
+  function onWeightsChanged() {
+    syncWeightInputs();
+    try { localStorage.setItem('bench-weights', JSON.stringify(weights)); } catch (e) { /* ignore */ }
+    renderRanking();
+  }
+
+  function scoreCellStyle(score) {
+    // One-hue sequential scale mixed into the surface; ink flips once the fill gets dark enough.
+    var mix = Math.round(8 + 0.82 * score);
+    return {
+      background: 'color-mix(in srgb, var(--scale-max) ' + mix + '%, var(--surface-1))',
+      color: mix >= 62 ? 'var(--scale-ink-strong)' : 'var(--text-primary)'
+    };
+  }
+
+  function renderRanking() {
+    var ranking = computeRanking();
+    var rows = ranking.rows.filter(function (r) { return r.total !== null; });
+    var best = bestPerAxis(rows);
+    var winnerBox = document.getElementById('winner');
+    winnerBox.replaceChildren();
+
+    if (!rows.length) {
+      winnerBox.appendChild(el('p', { class: 'empty', text: 'Aucune donnée pour cette sélection' }));
+    } else {
+      var w = rows[0];
+      var others = rows.slice(1, 3).map(function (r) { return r.browser + ' (' + fmt(r.total, 0) + ')'; });
+      var runs = ranking.cells.reduce(function (s, c) { return s + c.runs; }, 0);
+      winnerBox.appendChild(el('div', { class: 'winner-head' }, [
+        el('span', { class: 'winner-name' }, [swatch(w.browser), w.browser]),
+        el('span', { class: 'winner-score' }, [fmt(w.total, 0), el('small', { text: ' / 100' })])
+      ]));
+      winnerBox.appendChild(el('p', { class: 'winner-sub', text: (others.length ? 'devant ' + others.join(' et ') + ' · ' : '') + ranking.targets.length + ' cibles, ' + runs + ' runs' }));
+      var list = el('ul', { class: 'axis-winners' });
+      AXES.forEach(function (a) {
+        if (!weights[a.key]) return;
+        var who = best[a.key];
+        var row = who ? rows.find(function (r) { return r.browser === who; }) : null;
+        list.appendChild(el('li', {}, [
+          el('span', { class: 'axis', text: a.label }),
+          who ? el('span', { class: 'name' }, [swatch(who), who]) : el('span', { class: 'muted', text: 'égalité' }),
+          row ? el('span', { class: 'muted', text: a.raw(row.raw[a.key]) }) : null
+        ]));
+      });
+      winnerBox.appendChild(list);
+    }
+
+    var table = document.getElementById('ranking-table');
+    table.replaceChildren();
+    var head = [el('th', { text: '#' }), el('th', { text: 'Navigateur' }), el('th', { text: 'Score global' })]
+      .concat(AXES.map(function (a) {
+        return el('th', { class: 'axis', title: a.help + (weights[a.key] ? '' : ' (poids 0 : hors score global)'), text: a.label + (weights[a.key] ? ' ×' + weights[a.key] : '') });
+      }));
+    table.appendChild(el('thead', {}, [el('tr', {}, head)]));
+    var body = el('tbody');
+    ranking.rows.forEach(function (r, i) {
+      var cells = [
+        el('td', { class: 'rank', text: r.total === null ? '—' : String(i + 1) }),
+        el('td', {}, [browserLabel(r.browser, versionOf(r.browser))]),
+        el('td', {}, [r.total === null ? el('span', { class: 'muted', text: '—' }) : (function () {
+          var bar = el('span', { class: 'bar' }, [el('span')]);
+          bar.firstChild.style.width = Math.max(0, Math.min(100, r.total)) + '%';
+          return el('span', { class: 'global' }, [el('b', { text: fmt(r.total, 0) }), bar]);
+        })()])
+      ];
+      AXES.forEach(function (a) {
+        var s = r.score[a.key];
+        if (s === null) {
+          cells.push(el('td', { class: 'score muted', title: a.label + ' : pas de donnée', text: 'n/d' }));
+          return;
+        }
+        var td = el('td', {
+          class: 'score' + (best[a.key] === r.browser ? ' best' : ''),
+          title: a.label + ' : ' + fmt(s, 0) + '/100 — ' + a.help + ', ' + a.raw(r.raw[a.key]) + ' en moyenne sur ' + r.targets[a.key] + ' cible(s)'
+        }, [el('span', { class: 'v', text: fmt(s, 0) }), el('span', { class: 'raw', text: a.raw(r.raw[a.key]) })]);
+        var style = scoreCellStyle(s);
+        td.style.background = style.background;
+        td.style.color = style.color;
+        if (!weights[a.key]) td.style.opacity = '0.45';
+        cells.push(td);
+      });
+      body.appendChild(el('tr', { class: i === 0 && r.total !== null ? 'first' : '' }, cells));
+    });
+    if (!ranking.rows.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(3 + AXES.length), text: 'Aucune donnée pour cette sélection' })]));
+    table.appendChild(body);
+
+    var notes = [];
+    if (ranking.rows.some(function (r) { return r.browser === 'lightpanda'; })) {
+      notes.push('Lightpanda n’a pas de moteur de rendu : il ne télécharge ni images ni CSS, ce qui l’avantage en vitesse et en mémoire sur les pages riches en médias.');
+    }
+    if (data.memoryMetrics.length > 1) notes.push('Mémoire : private working set (Windows) et USS (WSL), deux mesures de la mémoire propre au navigateur.');
+    notes.push('★ = meilleur sur l’axe (pas d’étoile en cas d’égalité). Un axe à poids 0 est grisé et ne compte pas dans le score global.');
+    document.getElementById('ranking-notes').textContent = notes.join(' ');
+  }
+
+  // ---------- views ----------
+  var activeView = 'ranking';
+  try { if (localStorage.getItem('bench-view') === 'details') activeView = 'details'; } catch (e) { /* ignore */ }
+
+  function showView(view) {
+    activeView = view;
+    ['ranking', 'details'].forEach(function (v) {
+      document.getElementById('tab-' + v).setAttribute('aria-selected', v === view ? 'true' : 'false');
+      document.getElementById('view-' + v).hidden = v !== view;
+    });
+    try { localStorage.setItem('bench-view', view); } catch (e) { /* ignore */ }
+    update();
+  }
+  ['ranking', 'details'].forEach(function (v) {
+    document.getElementById('tab-' + v).addEventListener('click', function () { showView(v); });
+  });
+
   function update() {
+    // Charts are only built while visible: Chart.js cannot size a canvas inside a hidden panel.
+    if (activeView === 'ranking') {
+      renderRanking();
+      return;
+    }
     renderSummary();
     renderAntiBot();
     renderLoadChart();
@@ -585,7 +922,8 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
   renderMeta();
   renderFilters();
-  update();
+  renderWeights();
+  showView(activeView);
   // Charts read colors from CSS tokens, so they are rebuilt when the color scheme flips.
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', update);
 })();
