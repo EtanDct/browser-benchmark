@@ -1,17 +1,59 @@
+import type { AntiBotRule, AntiBotVerdict } from '../antibot/evaluators.js';
+
+export interface NavigateOptions {
+  timeoutMs: number;
+  /** Always waited after `load` before capturing the DOM, so late JS can run. */
+  settleMs: number;
+  /** Extra time allowed for an anti-bot challenge to clear itself (polled, exits early). */
+  challengeWaitMs: number;
+  antiBot?: AntiBotRule;
+}
+
+export interface DomStats {
+  elementCount: number;
+  textLength: number;
+}
+
 export interface NavigationResult {
   success: boolean;
   httpStatus?: number;
+  /** navigation start -> `load` event, wall-clock measured by the adapter. */
   loadTimeMs: number;
   antiBotPassed?: boolean;
+  antiBot?: AntiBotVerdict;
+  /** sha256 of the element tag sequence: compares DOM structure across browsers. */
   domSnapshotHash?: string;
+  domStats?: DomStats;
+  finalUrl?: string;
+  title?: string;
+  /** loadEventEnd from the Navigation Timing API, when the browser exposes it. */
+  navTimingLoadMs?: number;
   errorMessage?: string;
 }
 
+export interface LaunchResult {
+  /** Root PID of the browser process tree, or null when the browser runs outside our control (remote endpoint). */
+  pid: number | null;
+}
+
+export interface Availability {
+  available: boolean;
+  reason?: string;
+}
+
 export interface BrowserAdapter {
-  /** ex: "puppeteer-chromium" */
+  /** ex: "puppeteer" */
   name: string;
-  /** demarre le navigateur, retourne le PID racine pour le monitoring */
-  launch(): Promise<{ pid: number }>;
-  navigate(url: string): Promise<NavigationResult>;
+  launch(): Promise<LaunchResult>;
+  navigate(url: string, options: NavigateOptions): Promise<NavigationResult>;
   close(): Promise<void>;
+  version?(): Promise<string>;
+}
+
+export interface AdapterDefinition {
+  name: string;
+  description: string;
+  create(): BrowserAdapter;
+  /** Cheap pre-flight check so a campaign can skip a browser that is not installed. */
+  checkAvailability(): Promise<Availability>;
 }

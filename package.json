@@ -4,23 +4,28 @@
   "description": "Benchmark comparant plusieurs navigateurs/frameworks headless sur le contournement anti-bot, la performance et la fidelite de rendu",
   "private": true,
   "type": "module",
-  "main": "dist/cli.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "bench": "tsx src/cli.ts",
+    "bench": "tsx src/cli.ts bench",
+    "aggregate": "tsx src/cli.ts aggregate",
     "dashboard": "tsx dashboard/generate-dashboard.ts",
-    "lint": "eslint src",
-    "typecheck": "tsc --noEmit"
+    "list": "tsx src/cli.ts list",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"test/**/*.test.ts\""
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
-    "pidusage": "^3.0.2"
+    "pidusage": "^3.0.2",
+    "playwright": "^1.63.0",
+    "puppeteer": "^25.11.0",
+    "selenium-webdriver": "^4.49.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "@types/node": "^22.20.4",
+    "@types/pidusage": "^2.0.5",
+    "@types/selenium-webdriver": "^4.35.7",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
   }
 }

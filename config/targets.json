@@ -1,9 +1,66 @@
 {
-  "antibot": [
-    { "name": "sannysoft", "url": "https://bot.sannysoft.com" },
-    { "name": "nowsecure", "url": "https://nowsecure.nl" }
-  ],
-  "performance": [
-    { "name": "static-baseline", "url": "https://example.com" }
+  "defaults": {
+    "timeoutMs": 30000,
+    "settleMs": 1000,
+    "challengeWaitMs": 15000
+  },
+  "targets": [
+    {
+      "name": "sannysoft",
+      "group": "antibot",
+      "url": "https://bot.sannysoft.com",
+      "description": "Classic headless fingerprinting checks (webdriver flag, plugins, WebGL...)",
+      "settleMs": 3000,
+      "antiBot": { "evaluator": "sannysoft" }
+    },
+    {
+      "name": "nowsecure",
+      "group": "antibot",
+      "url": "https://nowsecure.nl",
+      "description": "Historically behind a Cloudflare challenge; since 2026 it serves the page directly (even to curl). Add real protected pages in targets.local.json",
+      "antiBot": { "evaluator": "cloudflare" }
+    },
+    {
+      "name": "static-baseline",
+      "group": "performance",
+      "url": "https://example.com",
+      "description": "Minimal static page (baseline)"
+    },
+    {
+      "name": "js-heavy-spa",
+      "group": "performance",
+      "url": "https://react.dev",
+      "description": "Public React/Next.js site with heavy client-side JS"
+    },
+    {
+      "name": "media-heavy",
+      "group": "performance",
+      "url": "https://en.wikipedia.org/wiki/Cat",
+      "description": "Long article with many images"
+    },
+    {
+      "name": "local-static",
+      "group": "local",
+      "url": "local://static",
+      "description": "Deterministic static page served locally"
+    },
+    {
+      "name": "local-heavy-js",
+      "group": "local",
+      "url": "local://heavy-js?kb=1000",
+      "description": "1 MB of generated JS building ~6k DOM nodes"
+    },
+    {
+      "name": "local-images",
+      "group": "local",
+      "url": "local://images?count=100&size=256",
+      "description": "100 generated 256x256 PNG images"
+    },
+    {
+      "name": "local-spa",
+      "group": "local",
+      "url": "local://spa?items=500",
+      "description": "Client-side rendered list fetched from a JSON API"
+    }
   ]
 }

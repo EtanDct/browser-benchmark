@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Benchmark navigateurs headless</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --series-other: #898781;
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-critical: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface-1: #1a1a19;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.10);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text-primary);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; }
+header h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+.meta { color: var(--text-secondary); font-size: 13px; }
+.meta span + span::before { content: "·"; margin: 0 8px; color: var(--text-muted); }
+
+.filters {
+  display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: flex-start;
+  margin: 20px 0; padding: 12px 16px;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+}
+@media (min-width: 900px) {
+  .filters { position: sticky; top: 0; z-index: 5; }
+}
+.filter-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.filter-group > .label { color: var(--text-secondary); font-size: 12px; font-weight: 600; margin-right: 4px; text-transform: uppercase; letter-spacing: .04em; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px;
+  cursor: pointer; user-select: none; font-size: 13px; color: var(--text-primary);
+}
+.chip input { position: absolute; opacity: 0; pointer-events: none; }
+.chip:has(input:not(:checked)) { color: var(--text-muted); opacity: .6; }
+.chip:has(input:focus-visible) { outline: 2px solid var(--series-1); outline-offset: 2px; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+section { margin-top: 28px; }
+section > h2 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+section > p.hint { margin: 0 0 12px; color: var(--text-secondary); font-size: 13px; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); gap: 16px; }
+.chart-box { position: relative; height: 340px; }
+.chart-box.short { height: 260px; }
+.card h3 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+.card .sub { color: var(--text-secondary); font-size: 12px; margin: 0 0 10px; }
+
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { color: var(--text-secondary); font-weight: 600; font-size: 12px; position: sticky; top: 0; background: var(--surface-1); }
+th:first-child, td:first-child, td.left, th.left { text-align: left; }
+td { font-variant-numeric: tabular-nums; }
+.name { display: inline-flex; align-items: center; gap: 8px; }
+.version { color: var(--text-muted); font-size: 12px; }
+.muted { color: var(--text-muted); }
+.err { color: var(--text-secondary); max-width: 360px; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+
+.status { display: inline-flex; align-items: center; gap: 6px; color: var(--text-primary); }
+.status svg { flex: none; }
+
+.drill-controls { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; align-items: center; }
+.drill-controls label { color: var(--text-secondary); font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
+select {
+  font: inherit; color: var(--text-primary); background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px;
+}
+.empty { color: var(--text-muted); padding: 32px 0; text-align: center; }
+footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Benchmark navigateurs headless</h1>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <div class="filters" role="group" aria-label="Filtres">
+    <div class="filter-group" id="browser-filters"><span class="label">Navigateurs</span></div>
+    <div class="filter-group" id="target-filters"><span class="label">Cibles</span></div>
+  </div>
+
+  <section>
+    <h2>Vue d'ensemble</h2>
+    <p class="hint">Agrégé sur les cibles sélectionnées. Temps de chargement = moyenne des médianes par cible ; mémoire = <span id="mem-metric"></span>, somme sur tout l'arbre de process.</p>
+    <div class="card table-wrap"><table id="summary-table"></table></div>
+  </section>
+
+  <section>
+    <h2>Anti-bot</h2>
+    <p class="hint">Taux de passage par navigateur et par cible anti-bot. ✓ ≥ 80 %, ! 40–80 %, ✕ &lt; 40 %. Survoler une cellule pour le détail des verdicts.</p>
+    <div class="card table-wrap"><table id="antibot-table"></table></div>
+  </section>
+
+  <section>
+    <h2>Performance</h2>
+    <div class="grid-2">
+      <div class="card">
+        <h3>Temps de chargement médian par cible</h3>
+        <p class="sub">Début de navigation → événement load, en ms (plus bas = mieux)</p>
+        <div class="chart-box"><canvas id="load-chart" aria-label="Temps de chargement médian par cible et par navigateur"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Mémoire par navigateur</h3>
+        <p class="sub">Barre = moyenne pendant le run · losange = pic moyen, en Mo</p>
+        <div class="chart-box"><canvas id="mem-chart" aria-label="Mémoire moyenne et pic par navigateur"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Évolution RAM / CPU d'un run</h2>
+    <p class="hint">Échantillonnage continu de l'arbre de process, du navigateur prêt jusqu'à la capture du DOM. Le trait vertical marque l'événement load.</p>
+    <div class="card">
+      <div class="drill-controls">
+        <label>Navigateur <select id="drill-browser"></select></label>
+        <label>Cible <select id="drill-target"></select></label>
+        <label>Run <select id="drill-run"></select></label>
+        <span class="muted" id="drill-info"></span>
+      </div>
+      <div class="grid-2">
+        <div>
+          <h3>Mémoire (Mo)</h3>
+          <div class="chart-box short"><canvas id="drill-mem" aria-label="Mémoire dans le temps"></canvas></div>
+        </div>
+        <div>
+          <h3>CPU (% d'un cœur)</h3>
+          <div class="chart-box short"><canvas id="drill-cpu" aria-label="CPU dans le temps"></canvas></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Détail navigateur × cible</h2>
+    <p class="hint">Fidélité = part des runs dont la structure DOM (hash de la séquence de balises) est identique au consensus inter-navigateurs pour cette cible.</p>
+    <div class="card table-wrap"><table id="detail-table"></table></div>
+  </section>
+
+  <footer id="footer"></footer>
+</main>
+
+<script id="bench-data" type="application/json">__BENCH_DATA__</script>
+<script>
+(function () {
+  'use strict';
+  var data = JSON.parse(document.getElementById('bench-data').textContent);
+
+  // Color follows the browser, never its position in the current filter.
+  var KNOWN_ORDER = ['puppeteer', 'playwright-chromium', 'playwright-firefox', 'playwright-webkit', 'lightpanda', 'selenium-chrome'];
+  var slotOf = {};
+  KNOWN_ORDER.forEach(function (name, i) { slotOf[name] = i + 1; });
+  var nextSlot = KNOWN_ORDER.length + 1;
+  data.browsers.forEach(function (b) { if (!slotOf[b]) slotOf[b] = nextSlot <= 8 ? nextSlot++ : 'other'; });
+  function slotRank(b) { return slotOf[b] === 'other' ? 99 : slotOf[b]; }
+  data.browsers.sort(function (a, b) { return slotRank(a) - slotRank(b) || a.localeCompare(b); });
+
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function colorOf(browser) { return css('--series-' + slotOf[browser]); }
+
+  var state = { browsers: new Set(data.browsers), targets: new Set(data.targets.map(function (t) { return t.name; })) };
+  var charts = {};
+
+  function el(tag, attrs, children) {
+    var node = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === 'text') node.textContent = attrs[k];
+      else if (k === 'class') node.className = attrs[k];
+      else node.setAttribute(k, attrs[k]);
+    });
+    (children || []).forEach(function (c) { if (c) node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return node;
+  }
+  function fmt(v, digits, unit) {
+    if (v === null || v === undefined || isNaN(v)) return '—';
+    return v.toLocaleString('fr-FR', { maximumFractionDigits: digits || 0, minimumFractionDigits: digits || 0 }) + (unit || '');
+  }
+  function pct(v) { return v === null || v === undefined ? '—' : fmt(v * 100, 0, ' %'); }
+  function mean(values) {
+    var present = values.filter(function (v) { return typeof v === 'number'; });
+    return present.length ? present.reduce(function (a, b) { return a + b; }, 0) / present.length : null;
+  }
+  function swatch(browser) {
+    var s = el('span', { class: 'swatch' });
+    s.style.background = colorOf(browser);
+    return s;
+  }
+  function browserLabel(browser, version) {
+    return el('span', { class: 'name' }, [swatch(browser), browser, version ? el('span', { class: 'version', text: version }) : null]);
+  }
+
+  var STATUS_ICONS = {
+    good: '<path d="M3 8.5l3 3 7-7" fill="none" stroke="var(--status-good)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+    warning: '<path d="M8 1.8l6.5 12H1.5z" fill="var(--status-warning)"/><path d="M8 6v3.5M8 11.6v.1" stroke="#0b0b0b" stroke-width="1.6" stroke-linecap="round"/>',
+    critical: '<path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="var(--status-critical)" stroke-width="2.2" stroke-linecap="round"/>'
+  };
+  function statusBadge(rate, title) {
+    var level = rate >= 0.8 ? 'good' : rate >= 0.4 ? 'warning' : 'critical';
+    var wrap = el('span', { class: 'status', title: title || '' });
+    wrap.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">' + STATUS_ICONS[level] + '</svg>';
+    wrap.appendChild(document.createTextNode(pct(rate)));
+    return wrap;
+  }
+
+  function visibleCells() {
+    return data.cells.filter(function (c) { return state.browsers.has(c.browser) && state.targets.has(c.target); });
+  }
+  function visibleBrowsers() { return data.browsers.filter(function (b) { return state.browsers.has(b); }); }
+  function visibleTargets() { return data.targets.filter(function (t) { return state.targets.has(t.name); }); }
+  function versionOf(browser) {
+    var s = data.browserSummaries.find(function (x) { return x.browser === browser; });
+    return s && s.browserVersion;
+  }
+
+  // ---------- header & filters ----------
+  function renderMeta() {
+    var env = data.environment || {};
+    var meta = document.getElementById('meta');
+    [
+      'Généré le ' + new Date(data.generatedAt).toLocaleString('fr-FR'),
+      data.runCount + ' runs',
+      env.platform ? env.platform + ' ' + env.osRelease + ' (' + env.arch + ')' : null,
+      env.cpuModel ? env.cpuModel + ' × ' + env.cpuCount : null,
+      env.totalMemBytes ? fmt(env.totalMemBytes / Math.pow(2, 30), 0, ' Go RAM') : null,
+      env.nodeVersion ? 'Node ' + env.nodeVersion : null
+    ].filter(Boolean).forEach(function (text) { meta.appendChild(el('span', { text: text })); });
+    document.getElementById('mem-metric').textContent = data.memoryMetric === 'private-working-set'
+      ? 'private working set (mémoire propre, hors pages partagées)'
+      : data.memoryMetric === 'rss' ? 'RSS' : 'non mesurée';
+    document.getElementById('footer').textContent = 'Généré depuis results/aggregated.json — régénérer avec npm run dashboard.';
+  }
+
+  function renderFilters() {
+    var bf = document.getElementById('browser-filters');
+    data.browsers.forEach(function (b) {
+      var input = el('input', { type: 'checkbox', checked: '' });
+      input.addEventListener('change', function () { input.checked ? state.browsers.add(b) : state.browsers.delete(b); update(); });
+      bf.appendChild(el('label', { class: 'chip' }, [input, swatch(b), b]));
+    });
+    var tf = document.getElementById('target-filters');
+    data.targets.forEach(function (t) {
+      var input = el('input', { type: 'checkbox', checked: '' });
+      input.addEventListener('change', function () { input.checked ? state.targets.add(t.name) : state.targets.delete(t.name); update(); });
+      tf.appendChild(el('label', { class: 'chip', title: t.group + ' — ' + t.url }, [input, t.name]));
+    });
+  }
+
+  // ---------- tables ----------
+  function renderSummary() {
+    var table = document.getElementById('summary-table');
+    table.replaceChildren();
+    var head = ['Navigateur', 'Runs', 'Succès', 'Anti-bot', 'Chargement', 'RAM moy.', 'RAM pic', 'CPU moy.', 'Fidélité DOM'];
+    table.appendChild(el('thead', {}, [el('tr', {}, head.map(function (h) { return el('th', { text: h }); }))]));
+    var body = el('tbody');
+    var cells = visibleCells();
+    visibleBrowsers().forEach(function (b) {
+      var own = cells.filter(function (c) { return c.browser === b; });
+      if (!own.length) return;
+      var runs = own.reduce(function (s, c) { return s + c.runs; }, 0);
+      var successes = own.reduce(function (s, c) { return s + c.successes; }, 0);
+      var ab = own.filter(function (c) { return c.antiBot; });
+      var abEval = ab.reduce(function (s, c) { return s + c.antiBot.evaluated; }, 0);
+      var abPass = ab.reduce(function (s, c) { return s + c.antiBot.passed; }, 0);
+      var peak = own.reduce(function (m, c) { return c.memPeakMB ? Math.max(m, c.memPeakMB.max) : m; }, 0);
+      body.appendChild(el('tr', {}, [
+        el('td', {}, [browserLabel(b, versionOf(b))]),
+        el('td', { text: String(runs) }),
+        el('td', { text: pct(successes / runs) }),
+        el('td', {}, [abEval ? statusBadge(abPass / abEval, abPass + '/' + abEval + ' runs') : el('span', { class: 'muted', text: '—' })]),
+        el('td', { text: fmt(mean(own.map(function (c) { return c.loadTimeMs && c.loadTimeMs.median; })), 0, ' ms') }),
+        el('td', { text: fmt(mean(own.map(function (c) { return c.memAvgMB && c.memAvgMB.mean; })), 0, ' Mo') }),
+        el('td', { text: peak ? fmt(peak, 0, ' Mo') : '—' }),
+        el('td', { text: fmt(mean(own.map(function (c) { return c.cpuAvgPercent && c.cpuAvgPercent.mean; })), 0, ' %') }),
+        el('td', { text: pct(mean(own.map(function (c) { return c.fidelity && c.fidelity.matchRate; }))) })
+      ]));
+    });
+    if (!body.children.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(head.length), text: 'Aucune donnée pour cette sélection' })]));
+    table.appendChild(body);
+  }
+
+  function renderAntiBot() {
+    var table = document.getElementById('antibot-table');
+    table.replaceChildren();
+    var targets = visibleTargets().filter(function (t) {
+      return data.cells.some(function (c) { return c.target === t.name && c.antiBot; });
+    });
+    if (!targets.length) {
+      table.appendChild(el('tbody', {}, [el('tr', {}, [el('td', { class: 'empty', text: 'Aucune cible anti-bot dans la sélection' })])]));
+      return;
+    }
+    var head = [el('th', { text: 'Navigateur' })].concat(targets.map(function (t) { return el('th', { text: t.name, title: t.url }); }), [el('th', { text: 'Global' })]);
+    table.appendChild(el('thead', {}, [el('tr', {}, head)]));
+    var body = el('tbody');
+    visibleBrowsers().forEach(function (b) {
+      var row = [el('td', {}, [browserLabel(b)])];
+      var totalEval = 0, totalPass = 0;
+      targets.forEach(function (t) {
+        var cell = data.cells.find(function (c) { return c.browser === b && c.target === t.name; });
+        if (!cell || !cell.antiBot) { row.push(el('td', { class: 'muted', text: '—' })); return; }
+        totalEval += cell.antiBot.evaluated;
+        totalPass += cell.antiBot.passed;
+        var detail = Object.keys(cell.antiBot.outcomes).map(function (k) { return k + ' ×' + cell.antiBot.outcomes[k]; }).join(', ');
+        var withVerdict = Object.keys(cell.antiBot.outcomes).reduce(function (s, k) { return s + cell.antiBot.outcomes[k]; }, 0);
+        if (cell.antiBot.evaluated > withVerdict) detail += (detail ? ', ' : '') + 'page non chargée ×' + (cell.antiBot.evaluated - withVerdict);
+        row.push(el('td', {}, [statusBadge(cell.antiBot.passRate, detail)]));
+      });
+      row.push(el('td', {}, [totalEval ? statusBadge(totalPass / totalEval, totalPass + '/' + totalEval + ' runs') : el('span', { class: 'muted', text: '—' })]));
+      body.appendChild(el('tr', {}, row));
+    });
+    table.appendChild(body);
+  }
+
+  function renderDetail() {
+    var table = document.getElementById('detail-table');
+    table.replaceChildren();
+    var head = ['Navigateur', 'Cible', 'Succès', 'Chargement méd.', 'moy. ± σ', 'p95', 'Lancement', 'RAM moy.', 'RAM pic', 'CPU moy.', 'CPU pic', 'Fidélité', 'Éléments DOM', 'Erreurs'];
+    table.appendChild(el('thead', {}, [el('tr', {}, head.map(function (h) { return el('th', { text: h }); }))]));
+    var body = el('tbody');
+    visibleCells().forEach(function (c) {
+      var fid = c.fidelity;
+      body.appendChild(el('tr', {}, [
+        el('td', {}, [browserLabel(c.browser)]),
+        el('td', { class: 'left', title: c.url, text: c.target }),
+        el('td', { text: c.successes + '/' + c.runs + (c.timeouts ? ' (' + c.timeouts + ' timeout)' : '') }),
+        el('td', { text: fmt(c.loadTimeMs && c.loadTimeMs.median, 0, ' ms') }),
+        el('td', { text: c.loadTimeMs ? fmt(c.loadTimeMs.mean, 0) + ' ± ' + fmt(c.loadTimeMs.stddev, 0) : '—' }),
+        el('td', { text: fmt(c.loadTimeMs && c.loadTimeMs.p95, 0, ' ms') }),
+        el('td', { text: fmt(c.launchTimeMs && c.launchTimeMs.median, 0, ' ms') }),
+        el('td', { text: fmt(c.memAvgMB && c.memAvgMB.mean, 0, ' Mo') }),
+        el('td', { text: fmt(c.memPeakMB && c.memPeakMB.mean, 0, ' Mo') }),
+        el('td', { text: fmt(c.cpuAvgPercent && c.cpuAvgPercent.mean, 0, ' %') }),
+        el('td', { text: fmt(c.cpuPeakPercent && c.cpuPeakPercent.mean, 0, ' %') }),
+        el('td', { text: fid ? pct(fid.matchRate) + (fid.distinctHashes > 1 ? ' (' + fid.distinctHashes + ' variantes)' : '') : '—' }),
+        el('td', { text: fid ? fmt(fid.elementCountMedian, 0) + ' / ' + fmt(fid.consensusElementCount, 0) : '—', title: 'médiane de ce navigateur / consensus' }),
+        el('td', { class: 'err', title: c.errors.join('\n'), text: c.errors[0] || '' })
+      ]));
+    });
+    if (!body.children.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(head.length), text: 'Aucune donnée pour cette sélection' })]));
+    table.appendChild(body);
+  }
+
+  // ---------- charts ----------
+  function baseOptions() {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { labels: { color: css('--text-secondary'), boxWidth: 10, boxHeight: 10, useBorderRadius: true, borderRadius: 3 } },
+        tooltip: { backgroundColor: css('--surface-1'), titleColor: css('--text-primary'), bodyColor: css('--text-secondary'), borderColor: css('--axis'), borderWidth: 1, padding: 10, boxPadding: 4 }
+      },
+      scales: {
+        x: { ticks: { color: css('--text-muted') }, grid: { display: false }, border: { color: css('--axis') } },
+        y: { beginAtZero: true, ticks: { color: css('--text-muted') }, grid: { color: css('--grid') }, border: { display: false } }
+      }
+    };
+  }
+  function replaceChart(id, config) {
+    if (charts[id]) charts[id].destroy();
+    charts[id] = new Chart(document.getElementById(id), config);
+  }
+
+  function renderLoadChart() {
+    var targets = visibleTargets();
+    var cells = visibleCells();
+    var browsers = visibleBrowsers().filter(function (b) { return cells.some(function (c) { return c.browser === b && c.loadTimeMs; }); });
+    var datasets = browsers.map(function (b) {
+      return {
+        label: b,
+        data: targets.map(function (t) {
+          var c = data.cells.find(function (x) { return x.browser === b && x.target === t.name; });
+          return c && c.loadTimeMs ? c.loadTimeMs.median : null;
+        }),
+        backgroundColor: colorOf(b),
+        borderRadius: { topLeft: 4, topRight: 4 },
+        borderSkipped: 'start',
+        barPercentage: 0.88,
+        categoryPercentage: 0.8
+      };
+    });
+    var options = baseOptions();
+    options.plugins.tooltip.callbacks = {
+      label: function (ctx) {
+        var c = data.cells.find(function (x) { return x.browser === ctx.dataset.label && x.target === targets[ctx.dataIndex].name; });
+        if (!c || !c.loadTimeMs) return ctx.dataset.label + ' : pas de donnée';
+        return ctx.dataset.label + ' : ' + fmt(c.loadTimeMs.median, 0, ' ms') + ' (moy. ' + fmt(c.loadTimeMs.mean, 0) + ' ± ' + fmt(c.loadTimeMs.stddev, 0) + ', p95 ' + fmt(c.loadTimeMs.p95, 0) + ')';
+      }
+    };
+    options.scales.y.title = { display: true, text: 'ms', color: css('--text-muted') };
+    replaceChart('load-chart', { type: 'bar', data: { labels: targets.map(function (t) { return t.name; }), datasets: datasets }, options: options });
+  }
+
+  function renderMemChart() {
+    var cells = visibleCells();
+    var browsers = visibleBrowsers().filter(function (b) { return cells.some(function (c) { return c.browser === b && c.memAvgMB; }); });
+    var avg = browsers.map(function (b) { return mean(cells.filter(function (c) { return c.browser === b; }).map(function (c) { return c.memAvgMB && c.memAvgMB.mean; })); });
+    var peak = browsers.map(function (b) { return mean(cells.filter(function (c) { return c.browser === b; }).map(function (c) { return c.memPeakMB && c.memPeakMB.mean; })); });
+    var options = baseOptions();
+    options.plugins.legend.display = false;
+    options.plugins.tooltip.callbacks = {
+      label: function (ctx) { return (ctx.datasetIndex === 0 ? 'Moyenne : ' : 'Pic moyen : ') + fmt(ctx.parsed.y, 0, ' Mo'); }
+    };
+    options.scales.y.title = { display: true, text: 'Mo', color: css('--text-muted') };
+    replaceChart('mem-chart', {
+      type: 'bar',
+      data: {
+        labels: browsers,
+        datasets: [
+          { label: 'Moyenne', data: avg, backgroundColor: browsers.map(colorOf), borderRadius: { topLeft: 4, topRight: 4 }, borderSkipped: 'start', barPercentage: 0.6 },
+          { label: 'Pic moyen', type: 'line', data: peak, showLine: false, pointStyle: 'rectRot', pointRadius: 6, pointHoverRadius: 8, pointBackgroundColor: css('--text-primary'), pointBorderColor: css('--surface-1'), pointBorderWidth: 2 }
+        ]
+      },
+      options: options
+    });
+  }
+
+  // ---------- drill-down ----------
+  var loadMarker = {
+    id: 'loadMarker',
+    afterDatasetsDraw: function (chart, args, opts) {
+      if (opts.x === null || opts.x === undefined) return;
+      var x = chart.scales.x.getPixelForValue(opts.x);
+      if (x < chart.chartArea.left || x > chart.chartArea.right) return;
+      var ctx = chart.ctx;
+      ctx.save();
+      ctx.strokeStyle = css('--text-secondary');
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, chart.chartArea.top);
+      ctx.lineTo(x, chart.chartArea.bottom);
+      ctx.stroke();
+      ctx.fillStyle = css('--text-secondary');
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillText('load', x + 4, chart.chartArea.top + 10);
+      ctx.restore();
+    }
+  };
+
+  function fillSelect(select, values, labelOf) {
+    var previous = select.value;
+    select.replaceChildren();
+    values.forEach(function (v) { select.appendChild(el('option', { value: String(v), text: labelOf ? labelOf(v) : String(v) })); });
+    if (values.map(String).indexOf(previous) >= 0) select.value = previous;
+  }
+
+  function renderDrillSelectors() {
+    var cells = visibleCells().filter(function (c) { return c.series.some(function (s) { return s.samples.length; }); });
+    var bSel = document.getElementById('drill-browser');
+    var tSel = document.getElementById('drill-target');
+    var rSel = document.getElementById('drill-run');
+    fillSelect(bSel, visibleBrowsers().filter(function (b) { return cells.some(function (c) { return c.browser === b; }); }));
+    fillSelect(tSel, cells.filter(function (c) { return c.browser === bSel.value; }).map(function (c) { return c.target; }));
+    var cell = cells.find(function (c) { return c.browser === bSel.value && c.target === tSel.value; });
+    fillSelect(rSel, cell ? cell.series.filter(function (s) { return s.samples.length; }).map(function (s) { return s.run; }) : [], function (r) { return '#' + r; });
+    renderDrillCharts(cell);
+  }
+
+  function renderDrillCharts(cell) {
+    var info = document.getElementById('drill-info');
+    var series = cell && cell.series.find(function (s) { return String(s.run) === document.getElementById('drill-run').value; });
+    var color = cell ? colorOf(cell.browser) : css('--series-other');
+    // Both charts share the same time window so RAM and CPU line up vertically.
+    var maxT = series && series.samples.length ? series.samples[series.samples.length - 1][0] : undefined;
+    function lineConfig(index, unit) {
+      var options = baseOptions();
+      options.plugins.legend.display = false;
+      options.interaction = { mode: 'index', intersect: false };
+      options.plugins.tooltip.callbacks = {
+        title: function (items) { return items.length ? 't = ' + fmt(items[0].parsed.x, 0, ' ms') : ''; },
+        label: function (ctx) { return fmt(ctx.parsed.y, 1, unit); }
+      };
+      options.plugins.loadMarker = { x: series ? series.loadTimeMs : null };
+      options.scales.x = { type: 'linear', min: 0, max: maxT, ticks: { color: css('--text-muted'), callback: function (v) { return fmt(v / 1000, 1, ' s'); } }, grid: { display: false }, border: { color: css('--axis') } };
+      return {
+        type: 'line',
+        data: { datasets: [{
+          data: series ? series.samples.filter(function (p) { return p[index] !== null; }).map(function (p) { return { x: p[0], y: p[index] }; }) : [],
+          borderColor: color, backgroundColor: color, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0
+        }] },
+        options: options,
+        plugins: [loadMarker]
+      };
+    }
+    replaceChart('drill-mem', lineConfig(1, ' Mo'));
+    replaceChart('drill-cpu', lineConfig(2, ' %'));
+    info.textContent = series
+      ? (series.success ? 'chargé en ' + fmt(series.loadTimeMs, 0, ' ms') : 'run en échec') + ' · ' + series.samples.length + ' échantillons'
+      : 'Aucune série RAM/CPU pour cette sélection';
+  }
+
+  ['drill-browser', 'drill-target'].forEach(function (id) { document.getElementById(id).addEventListener('change', renderDrillSelectors); });
+  document.getElementById('drill-run').addEventListener('change', function () {
+    var cell = data.cells.find(function (c) { return c.browser === document.getElementById('drill-browser').value && c.target === document.getElementById('drill-target').value; });
+    renderDrillCharts(cell);
+  });
+
+  function update() {
+    renderSummary();
+    renderAntiBot();
+    renderLoadChart();
+    renderMemChart();
+    renderDrillSelectors();
+    renderDetail();
+  }
+
+  renderMeta();
+  renderFilters();
+  update();
+  // Charts read colors from CSS tokens, so they are rebuilt when the color scheme flips.
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', update);
+})();
+</script>
+</body>
+</html>
