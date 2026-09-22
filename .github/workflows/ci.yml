@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Typecheck & unit tests
+    runs-on: ubuntu-latest
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  smoke:
+    name: End-to-end smoke (Linux, local fixtures)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Install Lightpanda nightly
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/lightpanda" https://github.com/lightpanda-io/browser/releases/download/nightly/lightpanda-x86_64-linux
+          chmod a+x "$RUNNER_TEMP/lightpanda"
+          echo "LIGHTPANDA_BIN=$RUNNER_TEMP/lightpanda" >> "$GITHUB_ENV"
+      - run: npm run bench -- --browsers=puppeteer,playwright-chromium,lightpanda --targets=local --runs=1 --pause=200
+      - name: Check every browser loaded pages and was monitored
+        run: |
+          node -e '
+            const r = require("./results/aggregated.json");
+            // Lightpanda is a nightly build: report it, but only the stable browsers gate the job.
+            const required = ["puppeteer", "playwright-chromium"];
+            let ok = true;
+            for (const s of r.browserSummaries) {
+              console.log(`${s.browser}: success ${s.successRate}, mem ${s.memAvgMB} MB, cpu ${s.cpuAvgPercent} %`);
+              if (required.includes(s.browser) && (s.successRate < 1 || !s.memAvgMB)) ok = false;
+            }
+            for (const b of required) if (!r.browsers.includes(b)) ok = false;
+            process.exit(ok ? 0 : 1);
+          '
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-results
+          path: |
+            results/
+            dashboard/index.html

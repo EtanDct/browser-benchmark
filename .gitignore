@@ -3,5 +3,6 @@ dist/
 results/raw/*.json
 results/aggregated.json
 dashboard/index.html
+config/targets.local.json
 *.log
 .DS_Store

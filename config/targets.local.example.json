@@ -1,0 +1,14 @@
+{
+  "targets": [
+    {
+      "name": "my-cloudflare-site",
+      "group": "antibot",
+      "url": "https://example.org/page-behind-cloudflare",
+      "description": "Copy this file to targets.local.json (git-ignored) and list your own Cloudflare-protected pages",
+      "antiBot": {
+        "evaluator": "cloudflare",
+        "successText": "text only visible once the real page is served"
+      }
+    }
+  ]
+}
