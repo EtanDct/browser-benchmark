@@ -6,6 +6,7 @@ const snapshot = (overrides: Partial<PageSnapshot> = {}): PageSnapshot => ({
   title: 'Home',
   url: 'https://example.org/',
   html: '<html><body>ok</body></html>',
+  text: 'ok',
   tags: 'HTML,HEAD,BODY',
   elementCount: 3,
   textLength: 2,
@@ -38,6 +39,14 @@ describe('completeNavigation', () => {
     const result = await completeNavigation(evaluate, { loadTimeMs: 50 }, { ...options, challengeWaitMs: 600, antiBot: { evaluator: 'cloudflare' } });
     assert.equal(result.antiBot?.outcome, 'challenge');
     assert.equal(result.antiBotPassed, false);
+  });
+
+  it('keeps polling until a detection page has computed its verdict', async () => {
+    let calls = 0;
+    const evaluate = async () => snapshot({ text: ++calls < 3 ? 'Running checks...' : '{ "isBot": true, "details": { "isAutomatedWithCDP": true } }' });
+    const result = await completeNavigation(evaluate, { loadTimeMs: 50 }, { ...options, antiBot: { evaluator: 'deviceandbrowserinfo' } });
+    assert.equal(result.antiBot?.outcome, 'detected');
+    assert.equal(calls, 3);
   });
 
   it('retries a snapshot interrupted by a navigation', async () => {

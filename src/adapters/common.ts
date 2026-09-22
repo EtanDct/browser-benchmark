@@ -7,6 +7,8 @@ export interface PageSnapshot {
   title: string;
   url: string;
   html: string;
+  /** Visible text: body without script/style/noscript/template, whitespace collapsed. */
+  text: string;
   tags: string;
   elementCount: number;
   textLength: number;
@@ -17,13 +19,26 @@ export interface PageSnapshot {
 /**
  * Evaluated in the page as a plain expression, so it works with every driver
  * (Puppeteer/Playwright `evaluate(string)`, Selenium `executeScript("return " + expr)`, Lightpanda via CDP).
- * textContent (not innerText) is used on purpose: it does not depend on a layout engine.
+ * Text comes from textContent on a script-free clone rather than innerText: innerText needs a layout
+ * engine (Lightpanda has none), and verdict strings often also appear inside the page's scripts.
  */
 export const SNAPSHOT_EXPRESSION = `(() => {
   const d = document;
   const els = d.getElementsByTagName('*');
   const tags = new Array(els.length);
   for (let i = 0; i < els.length; i++) tags[i] = String(els[i].tagName).toUpperCase();
+  let text = '';
+  if (d.body) {
+    try {
+      const clone = d.body.cloneNode(true);
+      const junk = clone.querySelectorAll('script,style,noscript,template');
+      for (let i = 0; i < junk.length; i++) junk[i].remove();
+      text = clone.textContent || '';
+    } catch (e) {
+      text = d.body.textContent || '';
+    }
+    text = text.replace(/\\s+/g, ' ').trim().slice(0, 200000);
+  }
   let navLoadMs, responseStatus;
   try {
     const n = performance.getEntriesByType('navigation')[0];
@@ -36,9 +51,10 @@ export const SNAPSHOT_EXPRESSION = `(() => {
     title: d.title || '',
     url: String(location.href),
     html: d.documentElement ? d.documentElement.outerHTML : '',
+    text: text,
     tags: tags.join(','),
     elementCount: els.length,
-    textLength: d.body ? (d.body.textContent || '').trim().length : 0,
+    textLength: text.length,
     navLoadMs: navLoadMs,
     responseStatus: responseStatus
   };
@@ -57,6 +73,7 @@ async function takeSnapshot(evaluate: Evaluator): Promise<PageSnapshot> {
       if (raw && typeof raw.html === 'string') {
         return {
           ...raw,
+          text: raw.text ?? '',
           navLoadMs: raw.navLoadMs ?? undefined,
           responseStatus: raw.responseStatus ?? undefined,
         };
@@ -95,17 +112,20 @@ export async function completeNavigation(
       const pollStart = Date.now();
       const evidence = () => ({
         html: snapshot.html,
+        text: snapshot.text,
         title: snapshot.title,
         url: snapshot.url,
         httpStatus: snapshot.responseStatus ?? loaded.httpStatus,
       });
       antiBot = evaluateAntiBot(rule, evidence());
-      while (antiBot.outcome === 'challenge' && Date.now() - pollStart < options.challengeWaitMs) {
+      // A challenge may clear itself, and detection pages often compute their verdict after load.
+      while ((antiBot.outcome === 'challenge' || antiBot.outcome === 'unknown') && Date.now() - pollStart < options.challengeWaitMs) {
         await sleep(500);
         snapshot = await takeSnapshot(evaluate);
         antiBot = evaluateAntiBot(rule, evidence());
       }
       antiBot.resolveMs = Date.now() - pollStart;
+      if (!antiBot.passed) antiBot.excerpt = snapshot.text.slice(0, 400);
     }
 
     return {

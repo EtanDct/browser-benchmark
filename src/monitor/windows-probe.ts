@@ -1,6 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
-import { createInterface } from 'node:readline';
-import type { RawSample, TreeProbe } from './resource-sampler.js';
+import { spawn } from 'node:child_process';
+import { LineProtocolProbe } from './line-probe.js';
 
 /**
  * wmic is gone from recent Windows 11 builds (so pidusage fails) and CIM queries take ~200ms each.
@@ -8,7 +7,7 @@ import type { RawSample, TreeProbe } from './resource-sampler.js';
  * (what Task Manager uses) returns pid, parent pid, private working set and CPU times of every process,
  * in a few ms and without opening handles on sandboxed renderer processes.
  *
- * Protocol: write a root PID on stdin to start tracking its tree, "0" to pause; one JSON line per tick.
+ * Speaks the LineProtocolProbe protocol.
  * Offsets are for the x64 SYSTEM_PROCESS_INFORMATION layout.
  */
 const CSHARP_SOURCE = String.raw`
@@ -138,64 +137,13 @@ public static class BenchSampler {
 }
 `;
 
-export class WindowsTreeProbe implements TreeProbe {
-  readonly memoryMetric = 'private-working-set' as const;
-  private ps?: ChildProcess;
-  private current?: { pid: number; onSample: (sample: RawSample) => void };
-
-  constructor(private intervalMs: number) {}
-
-  async start(): Promise<void> {
-    const script = `$ErrorActionPreference = 'Stop'\nAdd-Type -TypeDefinition @'\n${CSHARP_SOURCE}\n'@\n[BenchSampler]::Run(${this.intervalMs})`;
-    const encoded = Buffer.from(script, 'utf16le').toString('base64');
-    const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], {
+export function createWindowsProbe(intervalMs: number): LineProtocolProbe {
+  const script = `$ErrorActionPreference = 'Stop'\nAdd-Type -TypeDefinition @'\n${CSHARP_SOURCE}\n'@\n[BenchSampler]::Run(${intervalMs})`;
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  return new LineProtocolProbe('private-working-set', 'Windows', () =>
+    spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
-    });
-    this.ps = ps;
-    let stderr = '';
-    ps.stderr!.on('data', (chunk) => { stderr += chunk; });
-
-    await new Promise<void>((resolve, reject) => {
-      const lines = createInterface({ input: ps.stdout! });
-      const failTimer = setTimeout(() => reject(new Error('Windows sampler did not start within 30s')), 30_000);
-      ps.once('exit', (code) => {
-        clearTimeout(failTimer);
-        reject(new Error(`Windows sampler exited (code ${code}): ${stderr.trim().slice(0, 500)}`));
-      });
-      lines.on('line', (line) => {
-        if (line === 'READY') {
-          clearTimeout(failTimer);
-          resolve();
-          return;
-        }
-        const current = this.current;
-        if (!current || !line.startsWith('{')) return;
-        const parsed = JSON.parse(line) as { root: number; t: number; mem: number; cpu: number | null; n: number };
-        if (parsed.root !== current.pid) return;
-        current.onSample({ epochMs: parsed.t, memBytes: parsed.mem, cpuPercent: parsed.cpu, processCount: parsed.n });
-      });
-    });
-  }
-
-  track(pid: number, onSample: (sample: RawSample) => void): void {
-    this.current = { pid, onSample };
-    this.ps?.stdin?.write(`${pid}\n`);
-  }
-
-  untrack(): void {
-    this.current = undefined;
-    this.ps?.stdin?.write('0\n');
-  }
-
-  async dispose(): Promise<void> {
-    const ps = this.ps;
-    if (!ps || ps.exitCode !== null) return;
-    ps.removeAllListeners('exit');
-    ps.stdin?.end();
-    const exited = new Promise((resolve) => ps.once('exit', resolve));
-    const killTimer = setTimeout(() => ps.kill(), 2000);
-    await exited;
-    clearTimeout(killTimer);
-  }
+    }),
+  );
 }

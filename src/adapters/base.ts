@@ -31,14 +31,24 @@ export interface NavigationResult {
   errorMessage?: string;
 }
 
+/** Where a browser process lives: on this machine, or inside the WSL2 VM (Linux-only browsers on Windows). */
+export type ProcessLocation = 'host' | 'wsl';
+
 export interface LaunchResult {
   /** Root PID of the browser process tree, or null when the browser runs outside our control (remote endpoint). */
   pid: number | null;
+  /** Namespace of `pid`; defaults to 'host'. */
+  location?: ProcessLocation;
 }
 
 export interface Availability {
   available: boolean;
   reason?: string;
+  /**
+   * Set when the browser runs inside WSL: address of this machine as seen from there.
+   * The runner then also serves local:// fixtures on it and keeps a WSL sampler warm.
+   */
+  wslHostIp?: string;
 }
 
 export interface BrowserAdapter {

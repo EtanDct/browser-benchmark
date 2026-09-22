@@ -4,6 +4,7 @@ import { evaluateAntiBot, type PageEvidence } from '../src/antibot/evaluators.js
 
 const page = (overrides: Partial<PageEvidence>): PageEvidence => ({
   html: '<html><body><h1>Welcome</h1></body></html>',
+  text: 'Welcome',
   title: 'Welcome',
   url: 'https://example.org/',
   httpStatus: 200,
@@ -19,7 +20,7 @@ describe('cloudflare evaluator', () => {
 
   it('detects the interstitial by title, including the French locale', () => {
     assert.equal(evaluateAntiBot(rule, page({ title: 'Just a moment...' })).outcome, 'challenge');
-    assert.equal(evaluateAntiBot(rule, page({ title: 'Un instant…' })).outcome, 'challenge');
+    assert.equal(evaluateAntiBot(rule, page({ title: 'Un instant…', httpStatus: 403 })).outcome, 'challenge');
   });
 
   it('detects the interstitial by its challenge script options', () => {
@@ -33,14 +34,15 @@ describe('cloudflare evaluator', () => {
   });
 
   it('reports block pages and 4xx as blocked', () => {
-    assert.equal(evaluateAntiBot(rule, page({ html: '<h1>Sorry, you have been blocked</h1>' })).outcome, 'blocked');
+    assert.equal(evaluateAntiBot(rule, page({ text: 'Sorry, you have been blocked' })).outcome, 'blocked');
     assert.equal(evaluateAntiBot(rule, page({ httpStatus: 403 })).outcome, 'blocked');
   });
 
-  it('requires successText when configured', () => {
-    const withText = { ...rule, successText: 'Dashboard' };
-    assert.equal(evaluateAntiBot(withText, page({})).outcome, 'unknown');
-    assert.equal(evaluateAntiBot(withText, page({ html: '<h1>Dashboard</h1>' })).outcome, 'passed');
+  it('requires successText in the visible text, not in scripts', () => {
+    const withText = { ...rule, successText: 'You bypassed' };
+    const html = '<script>const msg = "You bypassed the challenge"</script>';
+    assert.equal(evaluateAntiBot(withText, page({ html })).outcome, 'unknown');
+    assert.equal(evaluateAntiBot(withText, page({ text: 'You bypassed the Cloudflare challenge! :D' })).outcome, 'passed');
   });
 });
 
@@ -65,11 +67,52 @@ describe('sannysoft evaluator', () => {
   });
 });
 
+describe('deviceandbrowserinfo evaluator', () => {
+  const rule = { evaluator: 'deviceandbrowserinfo' as const };
+
+  it('lists the signals that flagged the browser', () => {
+    const text = 'Are you a bot? ❌ You are a bot! { "isBot": true, "details": { "hasBotUserAgent": true, "isPlaywright": false, "isAutomatedWithCDP": true } }';
+    const verdict = evaluateAntiBot(rule, page({ text }));
+    assert.equal(verdict.outcome, 'detected');
+    assert.equal(verdict.detail, 'isBot: true (hasBotUserAgent, isAutomatedWithCDP)');
+  });
+
+  it('passes on isBot false and waits when the verdict is not computed yet', () => {
+    assert.equal(evaluateAntiBot(rule, page({ text: '{ "isBot": false, "details": {} }' })).outcome, 'passed');
+    assert.equal(evaluateAntiBot(rule, page({ text: 'Loading...' })).outcome, 'unknown');
+  });
+});
+
+describe('creepjs evaluator', () => {
+  const rule = { evaluator: 'creepjs' as const };
+  const ratings = (headless: number, like: number, stealth: number) =>
+    `<div class="like-headless-rating">${like}% like headless: </div><div class="headless-rating">${headless}% headless: </div><div class="stealth-rating">${stealth}% stealth: </div>`;
+
+  it('flags headless or stealth signals', () => {
+    const verdict = evaluateAntiBot(rule, page({ html: ratings(100, 38, 0) }));
+    assert.equal(verdict.outcome, 'detected');
+    assert.equal(verdict.detail, 'headless 100%, like-headless 38%, stealth 0%');
+    assert.equal(evaluateAntiBot(rule, page({ html: ratings(0, 20, 40) })).outcome, 'detected');
+  });
+
+  it('passes with no headless nor stealth signal, unknown before rendering', () => {
+    assert.equal(evaluateAntiBot(rule, page({ html: ratings(0, 20, 0) })).outcome, 'passed');
+    assert.equal(evaluateAntiBot(rule, page({})).outcome, 'unknown');
+  });
+});
+
 describe('generic evaluator', () => {
   it('uses status and failure texts', () => {
     const rule = { evaluator: 'generic' as const, failureTexts: ['Access Denied'] };
     assert.equal(evaluateAntiBot(rule, page({})).outcome, 'passed');
-    assert.equal(evaluateAntiBot(rule, page({ html: '<p>access denied</p>' })).outcome, 'blocked');
+    assert.equal(evaluateAntiBot(rule, page({ text: 'access denied' })).outcome, 'blocked');
     assert.equal(evaluateAntiBot(rule, page({ httpStatus: 429 })).outcome, 'blocked');
+  });
+
+  it('reads verdicts with patterns', () => {
+    const rule = { evaluator: 'generic' as const, detectedPattern: 'Test Results:\\s*Robot', passedPattern: 'Test Results:\\s*Normal' };
+    assert.equal(evaluateAntiBot(rule, page({ text: 'Home>Bot DetectionTest Results:Robot Webdriver' })).outcome, 'detected');
+    assert.equal(evaluateAntiBot(rule, page({ text: 'Test Results: Normal' })).outcome, 'passed');
+    assert.equal(evaluateAntiBot(rule, page({ text: 'Scanning...' })).outcome, 'unknown');
   });
 });

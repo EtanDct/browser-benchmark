@@ -32,6 +32,7 @@ export interface Cell {
   successes: number;
   successRate: number;
   timeouts: number;
+  memoryMetric: MemoryMetric | null;
   loadTimeMs: Stats | null;
   launchTimeMs: Stats | null;
   memAvgMB: Stats | null;
@@ -68,7 +69,8 @@ export interface AggregatedReport {
   schemaVersion: 1;
   generatedAt: string;
   runCount: number;
-  memoryMetric: MemoryMetric | null;
+  /** Distinct memory metrics in the report (Windows browsers vs browsers hosted in WSL...). */
+  memoryMetrics: MemoryMetric[];
   environment: EnvironmentInfo | null;
   browsers: string[];
   targets: Array<{ name: string; group: string; url: string }>;
@@ -157,6 +159,7 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
       successes: ok.length,
       successRate: ok.length / runs.length,
       timeouts: runs.filter((r) => r.timedOut).length,
+      memoryMetric: runs.find((r) => r.resources)?.resources?.memoryMetric ?? null,
       loadTimeMs: computeStats(ok.map((r) => r.navigation.loadTimeMs)),
       launchTimeMs: computeStats(runs.flatMap((r) => (r.launchTimeMs === undefined ? [] : [r.launchTimeMs]))),
       memAvgMB: computeStats(summaries.flatMap((s) => (s.memBytes ? [s.memBytes.avg / MB] : []))),
@@ -215,7 +218,7 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     runCount: records.length,
-    memoryMetric: records.find((r) => r.resources)?.resources?.memoryMetric ?? null,
+    memoryMetrics: [...new Set(cells.flatMap((c) => (c.memoryMetric ? [c.memoryMetric] : [])))],
     environment: latest?.environment ?? null,
     browsers,
     targets,

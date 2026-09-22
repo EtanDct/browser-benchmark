@@ -156,7 +156,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
   <section>
     <h2>Anti-bot</h2>
-    <p class="hint">Taux de passage par navigateur et par cible anti-bot. ✓ ≥ 80 %, ! 40–80 %, ✕ &lt; 40 %. Survoler une cellule pour le détail des verdicts.</p>
+    <p class="hint">Taux de passage par navigateur et par cible anti-bot. ✓ ≥ 80 %, ! 40–80 %, ✕ &lt; 40 %, suivi du verdict le plus fréquent en cas d'échec (« sans verdict » : le script de détection n'a pas abouti). Survoler une cellule pour le détail.</p>
     <div class="card table-wrap"><table id="antibot-table"></table></div>
   </section>
 
@@ -262,12 +262,19 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     warning: '<path d="M8 1.8l6.5 12H1.5z" fill="var(--status-warning)"/><path d="M8 6v3.5M8 11.6v.1" stroke="#0b0b0b" stroke-width="1.6" stroke-linecap="round"/>',
     critical: '<path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="var(--status-critical)" stroke-width="2.2" stroke-linecap="round"/>'
   };
-  function statusBadge(rate, title) {
+  function statusBadge(rate, title, note) {
     var level = rate >= 0.8 ? 'good' : rate >= 0.4 ? 'warning' : 'critical';
     var wrap = el('span', { class: 'status', title: title || '' });
     wrap.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">' + STATUS_ICONS[level] + '</svg>';
     wrap.appendChild(document.createTextNode(pct(rate)));
+    if (note) wrap.appendChild(el('span', { class: 'muted', text: note }));
     return wrap;
+  }
+
+  var OUTCOME_LABELS = { passed: 'passé', challenge: 'challenge', blocked: 'bloqué', detected: 'détecté', unknown: 'sans verdict' };
+  function dominantOutcome(outcomes) {
+    var keys = Object.keys(outcomes).sort(function (a, b) { return outcomes[b] - outcomes[a]; });
+    return keys.length ? OUTCOME_LABELS[keys[0]] || keys[0] : 'non chargée';
   }
 
   function visibleCells() {
@@ -292,9 +299,14 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       env.totalMemBytes ? fmt(env.totalMemBytes / Math.pow(2, 30), 0, ' Go RAM') : null,
       env.nodeVersion ? 'Node ' + env.nodeVersion : null
     ].filter(Boolean).forEach(function (text) { meta.appendChild(el('span', { text: text })); });
-    document.getElementById('mem-metric').textContent = data.memoryMetric === 'private-working-set'
-      ? 'private working set (mémoire propre, hors pages partagées)'
-      : data.memoryMetric === 'rss' ? 'RSS' : 'non mesurée';
+    var METRIC_LABELS = {
+      'private-working-set': 'private working set (Windows)',
+      uss: 'USS (Linux/WSL)',
+      rss: 'RSS, pages partagées incluses'
+    };
+    document.getElementById('mem-metric').textContent = data.memoryMetrics.length
+      ? data.memoryMetrics.map(function (m) { return METRIC_LABELS[m] || m; }).join(' / ') + (data.memoryMetrics.indexOf('rss') < 0 ? ' : mémoire propre au navigateur, hors pages partagées' : '')
+      : 'non mesurée';
     document.getElementById('footer').textContent = 'Généré depuis results/aggregated.json — régénérer avec npm run dashboard.';
   }
 
@@ -370,7 +382,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         var detail = Object.keys(cell.antiBot.outcomes).map(function (k) { return k + ' ×' + cell.antiBot.outcomes[k]; }).join(', ');
         var withVerdict = Object.keys(cell.antiBot.outcomes).reduce(function (s, k) { return s + cell.antiBot.outcomes[k]; }, 0);
         if (cell.antiBot.evaluated > withVerdict) detail += (detail ? ', ' : '') + 'page non chargée ×' + (cell.antiBot.evaluated - withVerdict);
-        row.push(el('td', {}, [statusBadge(cell.antiBot.passRate, detail)]));
+        row.push(el('td', {}, [statusBadge(cell.antiBot.passRate, detail, cell.antiBot.passRate < 1 ? dominantOutcome(cell.antiBot.outcomes) : null)]));
       });
       row.push(el('td', {}, [totalEval ? statusBadge(totalPass / totalEval, totalPass + '/' + totalEval + ' runs') : el('span', { class: 'muted', text: '—' })]));
       body.appendChild(el('tr', {}, row));
