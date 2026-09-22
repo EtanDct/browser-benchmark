@@ -96,6 +96,9 @@ export interface LoadedPage {
   httpStatus?: number;
 }
 
+/** Longest wait for a detection page to display its verdict (CreepJS, the slowest, needs ~5 s). */
+const VERDICT_WAIT_MS = 8_000;
+
 /** Shared post-load logic: settle, poll anti-bot challenge, snapshot and hash the DOM. */
 export async function completeNavigation(
   evaluate: Evaluator,
@@ -118,8 +121,14 @@ export async function completeNavigation(
         httpStatus: snapshot.responseStatus ?? loaded.httpStatus,
       });
       antiBot = evaluateAntiBot(rule, evidence());
-      // A challenge may clear itself, and detection pages often compute their verdict after load.
-      while ((antiBot.outcome === 'challenge' || antiBot.outcome === 'unknown') && Date.now() - pollStart < options.challengeWaitMs) {
+      // A challenge may clear itself; detection pages compute their verdict a few seconds after load,
+      // but when their script cannot run in a browser the verdict never comes, so that wait is shorter.
+      const stillWaiting = (verdict: AntiBotVerdict) => {
+        const elapsed = Date.now() - pollStart;
+        if (verdict.outcome === 'challenge') return elapsed < options.challengeWaitMs;
+        return verdict.outcome === 'unknown' && elapsed < Math.min(options.challengeWaitMs, VERDICT_WAIT_MS);
+      };
+      while (stillWaiting(antiBot)) {
         await sleep(500);
         snapshot = await takeSnapshot(evaluate);
         antiBot = evaluateAntiBot(rule, evidence());

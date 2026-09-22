@@ -49,6 +49,14 @@ describe('completeNavigation', () => {
     assert.equal(calls, 3);
   });
 
+  it('stops waiting for a verdict that never comes sooner than for a challenge', async () => {
+    const evaluate = async () => snapshot({ text: 'Are you a bot?' });
+    const started = Date.now();
+    const result = await completeNavigation(evaluate, { loadTimeMs: 50 }, { ...options, challengeWaitMs: 20_000, antiBot: { evaluator: 'deviceandbrowserinfo' } });
+    assert.equal(result.antiBot?.outcome, 'unknown');
+    assert.ok(Date.now() - started < 10_000);
+  });
+
   it('retries a snapshot interrupted by a navigation', async () => {
     let calls = 0;
     const evaluate = async () => {
