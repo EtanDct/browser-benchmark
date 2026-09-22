@@ -185,6 +185,20 @@ table.ranking tr.first td { font-weight: 600; }
 .global .bar span { display: block; height: 100%; background: var(--series-1); border-radius: 4px; }
 .global b { width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
 .note { margin-top: 10px; }
+
+th button.sort {
+  font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; white-space: nowrap;
+}
+th[aria-sort="ascending"] button.sort, th[aria-sort="descending"] button.sort { color: var(--text-primary); }
+th button.sort:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; border-radius: 3px; }
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; font-size: 13px; }
+.pager .muted { margin-right: auto; }
+.pager button {
+  font: inherit; min-width: 32px; padding: 4px 10px; cursor: pointer; color: var(--text-primary);
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px;
+}
+.pager button[aria-current="page"] { border-color: var(--series-1); color: var(--series-1); font-weight: 600; }
+.pager button:disabled { opacity: .4; cursor: default; }
 footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 </style>
 </head>
@@ -285,7 +299,10 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   <section>
     <h2>Détail navigateur × cible</h2>
     <p class="hint">Fidélité = part des runs dont la structure DOM (hash de la séquence de balises) est identique au consensus inter-navigateurs pour cette cible.</p>
-    <div class="card table-wrap"><table id="detail-table"></table></div>
+    <div class="card">
+      <div class="table-wrap"><table id="detail-table"></table></div>
+      <nav class="pager" id="detail-pager" aria-label="Pagination du détail"></nav>
+    </div>
   </section>
   </div>
 
@@ -398,13 +415,13 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     var bf = document.getElementById('browser-filters');
     data.browsers.forEach(function (b) {
       var input = el('input', { type: 'checkbox', checked: '' });
-      input.addEventListener('change', function () { input.checked ? state.browsers.add(b) : state.browsers.delete(b); update(); });
+      input.addEventListener('change', function () { input.checked ? state.browsers.add(b) : state.browsers.delete(b); detailPage = 0; update(); });
       bf.appendChild(el('label', { class: 'chip' }, [input, swatch(b), b]));
     });
     var tf = document.getElementById('target-filters');
     data.targets.forEach(function (t) {
       var input = el('input', { type: 'checkbox', checked: '' });
-      input.addEventListener('change', function () { input.checked ? state.targets.add(t.name) : state.targets.delete(t.name); update(); });
+      input.addEventListener('change', function () { input.checked ? state.targets.add(t.name) : state.targets.delete(t.name); detailPage = 0; update(); });
       tf.appendChild(el('label', { class: 'chip', title: t.group + ' — ' + t.url }, [input, t.name]));
     });
   }
@@ -474,33 +491,95 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     table.appendChild(body);
   }
 
+  var DETAIL_PAGE_SIZE = 25;
+  var detailPage = 0;
+  var detailSort = { key: 'load', dir: 1 };
+  function stat(s, field) { return s ? s[field] : null; }
+  // dir: default direction when the column is first clicked (1 = ascending, -1 = descending).
+  var DETAIL_COLUMNS = [
+    { key: 'browser', label: 'Navigateur', dir: 1, value: function (c) { return c.browser; }, render: function (c) { return el('td', {}, [browserLabel(c.browser)]); } },
+    { key: 'target', label: 'Cible', dir: 1, value: function (c) { return c.target; }, render: function (c) { return el('td', { class: 'left', title: c.url, text: c.target }); } },
+    { key: 'success', label: 'Succès', dir: -1, value: function (c) { return c.successRate; }, render: function (c) { return el('td', { text: c.successes + '/' + c.runs + (c.timeouts ? ' (' + c.timeouts + ' timeout)' : '') }); } },
+    { key: 'load', label: 'Chargement méd.', dir: 1, value: function (c) { return stat(c.loadTimeMs, 'median'); }, render: function (c) { return el('td', { text: fmt(stat(c.loadTimeMs, 'median'), 0, ' ms') }); } },
+    { key: 'mean', label: 'moy. ± σ', dir: 1, value: function (c) { return stat(c.loadTimeMs, 'mean'); }, render: function (c) { return el('td', { text: c.loadTimeMs ? fmt(c.loadTimeMs.mean, 0) + ' ± ' + fmt(c.loadTimeMs.stddev, 0) : '—' }); } },
+    { key: 'p95', label: 'p95', dir: 1, value: function (c) { return stat(c.loadTimeMs, 'p95'); }, render: function (c) { return el('td', { text: fmt(stat(c.loadTimeMs, 'p95'), 0, ' ms') }); } },
+    { key: 'launch', label: 'Lancement', dir: 1, value: function (c) { return stat(c.launchTimeMs, 'median'); }, render: function (c) { return el('td', { text: fmt(stat(c.launchTimeMs, 'median'), 0, ' ms') }); } },
+    { key: 'memAvg', label: 'RAM moy.', dir: 1, value: function (c) { return stat(c.memAvgMB, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.memAvgMB, 'mean'), 0, ' Mo') }); } },
+    { key: 'memPeak', label: 'RAM pic', dir: 1, value: function (c) { return stat(c.memPeakMB, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.memPeakMB, 'mean'), 0, ' Mo') }); } },
+    { key: 'cpuAvg', label: 'CPU moy.', dir: 1, value: function (c) { return stat(c.cpuAvgPercent, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.cpuAvgPercent, 'mean'), 0, ' %') }); } },
+    { key: 'cpuPeak', label: 'CPU pic', dir: 1, value: function (c) { return stat(c.cpuPeakPercent, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.cpuPeakPercent, 'mean'), 0, ' %') }); } },
+    { key: 'fidelity', label: 'Fidélité', dir: -1, value: function (c) { return stat(c.fidelity, 'matchRate'); }, render: function (c) { var f = c.fidelity; return el('td', { text: f ? pct(f.matchRate) + (f.distinctHashes > 1 ? ' (' + f.distinctHashes + ' variantes)' : '') : '—' }); } },
+    { key: 'elements', label: 'Éléments DOM', dir: -1, value: function (c) { return stat(c.fidelity, 'elementCountMedian'); }, render: function (c) { var f = c.fidelity; return el('td', { text: f ? fmt(f.elementCountMedian, 0) + ' / ' + fmt(f.consensusElementCount, 0) : '—', title: 'médiane de ce navigateur / consensus' }); } },
+    { key: 'errors', label: 'Erreurs', dir: -1, value: function (c) { return c.errors.length; }, render: function (c) { return el('td', { class: 'err', title: c.errors.join('\n'), text: c.errors[0] || '' }); } }
+  ];
+
+  function sortedDetailCells() {
+    var column = DETAIL_COLUMNS.find(function (col) { return col.key === detailSort.key; });
+    return visibleCells().slice().sort(function (a, b) {
+      var va = column.value(a), vb = column.value(b);
+      var missingA = va === null || va === undefined, missingB = vb === null || vb === undefined;
+      // Missing values always sink to the bottom, whatever the direction.
+      if (missingA || missingB) return missingA === missingB ? 0 : missingA ? 1 : -1;
+      var cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
+      return cmp * detailSort.dir || a.browser.localeCompare(b.browser) || a.target.localeCompare(b.target);
+    });
+  }
+
   function renderDetail() {
     var table = document.getElementById('detail-table');
     table.replaceChildren();
-    var head = ['Navigateur', 'Cible', 'Succès', 'Chargement méd.', 'moy. ± σ', 'p95', 'Lancement', 'RAM moy.', 'RAM pic', 'CPU moy.', 'CPU pic', 'Fidélité', 'Éléments DOM', 'Erreurs'];
-    table.appendChild(el('thead', {}, [el('tr', {}, head.map(function (h) { return el('th', { text: h }); }))]));
+    var headRow = el('tr', {}, DETAIL_COLUMNS.map(function (col) {
+      var active = detailSort.key === col.key;
+      var btn = el('button', { type: 'button', class: 'sort', text: col.label + (active ? (detailSort.dir === 1 ? ' ▲' : ' ▼') : '') });
+      btn.addEventListener('click', function () {
+        detailSort = active ? { key: col.key, dir: -detailSort.dir } : { key: col.key, dir: col.dir };
+        detailPage = 0;
+        renderDetail();
+      });
+      return el('th', { 'aria-sort': active ? (detailSort.dir === 1 ? 'ascending' : 'descending') : 'none' }, [btn]);
+    }));
+    table.appendChild(el('thead', {}, [headRow]));
+
+    var cells = sortedDetailCells();
+    var pages = Math.max(1, Math.ceil(cells.length / DETAIL_PAGE_SIZE));
+    detailPage = Math.min(detailPage, pages - 1);
+    var start = detailPage * DETAIL_PAGE_SIZE;
     var body = el('tbody');
-    visibleCells().forEach(function (c) {
-      var fid = c.fidelity;
-      body.appendChild(el('tr', {}, [
-        el('td', {}, [browserLabel(c.browser)]),
-        el('td', { class: 'left', title: c.url, text: c.target }),
-        el('td', { text: c.successes + '/' + c.runs + (c.timeouts ? ' (' + c.timeouts + ' timeout)' : '') }),
-        el('td', { text: fmt(c.loadTimeMs && c.loadTimeMs.median, 0, ' ms') }),
-        el('td', { text: c.loadTimeMs ? fmt(c.loadTimeMs.mean, 0) + ' ± ' + fmt(c.loadTimeMs.stddev, 0) : '—' }),
-        el('td', { text: fmt(c.loadTimeMs && c.loadTimeMs.p95, 0, ' ms') }),
-        el('td', { text: fmt(c.launchTimeMs && c.launchTimeMs.median, 0, ' ms') }),
-        el('td', { text: fmt(c.memAvgMB && c.memAvgMB.mean, 0, ' Mo') }),
-        el('td', { text: fmt(c.memPeakMB && c.memPeakMB.mean, 0, ' Mo') }),
-        el('td', { text: fmt(c.cpuAvgPercent && c.cpuAvgPercent.mean, 0, ' %') }),
-        el('td', { text: fmt(c.cpuPeakPercent && c.cpuPeakPercent.mean, 0, ' %') }),
-        el('td', { text: fid ? pct(fid.matchRate) + (fid.distinctHashes > 1 ? ' (' + fid.distinctHashes + ' variantes)' : '') : '—' }),
-        el('td', { text: fid ? fmt(fid.elementCountMedian, 0) + ' / ' + fmt(fid.consensusElementCount, 0) : '—', title: 'médiane de ce navigateur / consensus' }),
-        el('td', { class: 'err', title: c.errors.join('\n'), text: c.errors[0] || '' })
-      ]));
+    cells.slice(start, start + DETAIL_PAGE_SIZE).forEach(function (c) {
+      body.appendChild(el('tr', {}, DETAIL_COLUMNS.map(function (col) { return col.render(c); })));
     });
-    if (!body.children.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(head.length), text: 'Aucune donnée pour cette sélection' })]));
+    if (!cells.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(DETAIL_COLUMNS.length), text: 'Aucune donnée pour cette sélection' })]));
     table.appendChild(body);
+    renderPager(cells.length, pages, start);
+  }
+
+  function renderPager(total, pages, start) {
+    var pager = document.getElementById('detail-pager');
+    pager.replaceChildren();
+    if (!total) return;
+    function go(page) {
+      return function () {
+        detailPage = page;
+        renderDetail();
+        document.getElementById('detail-table').scrollIntoView({ block: 'nearest' });
+      };
+    }
+    pager.appendChild(el('span', { class: 'muted', text: 'Lignes ' + (start + 1) + '–' + Math.min(start + DETAIL_PAGE_SIZE, total) + ' sur ' + total }));
+    if (pages === 1) return;
+    var prev = el('button', { type: 'button', text: '‹ Précédent' });
+    prev.disabled = detailPage === 0;
+    prev.addEventListener('click', go(detailPage - 1));
+    pager.appendChild(prev);
+    for (var p = 0; p < pages; p++) {
+      var btn = el('button', { type: 'button', text: String(p + 1), 'aria-label': 'Page ' + (p + 1) });
+      if (p === detailPage) btn.setAttribute('aria-current', 'page');
+      btn.addEventListener('click', go(p));
+      pager.appendChild(btn);
+    }
+    var next = el('button', { type: 'button', text: 'Suivant ›' });
+    next.disabled = detailPage === pages - 1;
+    next.addEventListener('click', go(detailPage + 1));
+    pager.appendChild(next);
   }
 
   // ---------- charts ----------
