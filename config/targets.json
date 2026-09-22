@@ -1,0 +1,9 @@
+{
+  "antibot": [
+    { "name": "sannysoft", "url": "https://bot.sannysoft.com" },
+    { "name": "nowsecure", "url": "https://nowsecure.nl" }
+  ],
+  "performance": [
+    { "name": "static-baseline", "url": "https://example.com" }
+  ]
+}
