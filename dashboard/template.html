@@ -94,7 +94,7 @@ header h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
   background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
 }
 @media (min-width: 900px) {
-  .filters { position: sticky; top: 0; z-index: 5; }
+  .filters { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; }
 }
 .filter-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .filter-group > .label { color: var(--text-secondary); font-size: 12px; font-weight: 600; margin-right: 4px; text-transform: uppercase; letter-spacing: .04em; }
