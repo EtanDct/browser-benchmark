@@ -253,7 +253,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
   <section>
     <h2>Anti-bot</h2>
-    <p class="hint">Taux de passage par navigateur et par cible anti-bot. ✓ ≥ 80 %, ! 40–80 %, ✕ &lt; 40 %, suivi du verdict le plus fréquent en cas d'échec (« sans verdict » : le script de détection n'a pas abouti). Survoler une cellule pour le détail.</p>
+    <p class="hint">Taux de passage (✓ ≥ 80 %, ! 40–80 %, ✕ &lt; 40 %) : part des runs où le navigateur n'a été ni bloqué ni repéré. En cas d'échec, le verdict le plus fréquent (« sans verdict » : le script de détection n'a pas abouti) et la <strong>discrétion</strong> : part des contrôles de détection passés, qui départage les navigateurs même quand aucun ne passe. Survoler une cellule pour le détail.</p>
     <div class="card table-wrap"><table id="antibot-table"></table></div>
   </section>
 
@@ -427,10 +427,20 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   }
 
   // ---------- tables ----------
+  function cellDiscretion(c) {
+    return typeof c.antiBot.meanScore === 'number' ? c.antiBot.meanScore : c.antiBot.passRate;
+  }
+  // Graded stealth over several cells, weighted by the number of evaluated runs.
+  function discretionOf(cells) {
+    var ab = cells.filter(function (c) { return c.antiBot; });
+    var runs = ab.reduce(function (s, c) { return s + c.antiBot.evaluated; }, 0);
+    return runs ? ab.reduce(function (s, c) { return s + cellDiscretion(c) * c.antiBot.evaluated; }, 0) / runs : null;
+  }
+
   function renderSummary() {
     var table = document.getElementById('summary-table');
     table.replaceChildren();
-    var head = ['Navigateur', 'Runs', 'Succès', 'Anti-bot', 'Chargement', 'RAM moy.', 'RAM pic', 'CPU moy.', 'Fidélité DOM'];
+    var head = ['Navigateur', 'Runs', 'Succès', 'Anti-bot passé', 'Discrétion', 'Chargement', 'RAM moy.', 'RAM pic', 'CPU moy.', 'Fidélité DOM'];
     table.appendChild(el('thead', {}, [el('tr', {}, head.map(function (h) { return el('th', { text: h }); }))]));
     var body = el('tbody');
     var cells = visibleCells();
@@ -447,7 +457,8 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         el('td', {}, [browserLabel(b, versionOf(b))]),
         el('td', { text: String(runs) }),
         el('td', { text: pct(successes / runs) }),
-        el('td', {}, [abEval ? statusBadge(abPass / abEval, abPass + '/' + abEval + ' runs') : el('span', { class: 'muted', text: '—' })]),
+        el('td', {}, [abEval ? statusBadge(abPass / abEval, abPass + '/' + abEval + ' runs non bloqués') : el('span', { class: 'muted', text: '—' })]),
+        el('td', { text: pct(discretionOf(own)), title: 'part moyenne des contrôles de détection passés' }),
         el('td', { text: fmt(mean(own.map(function (c) { return c.loadTimeMs && c.loadTimeMs.median; })), 0, ' ms') }),
         el('td', { text: fmt(mean(own.map(function (c) { return c.memAvgMB && c.memAvgMB.mean; })), 0, ' Mo') }),
         el('td', { text: peak ? fmt(peak, 0, ' Mo') : '—' }),
@@ -483,9 +494,11 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         var detail = Object.keys(cell.antiBot.outcomes).map(function (k) { return k + ' ×' + cell.antiBot.outcomes[k]; }).join(', ');
         var withVerdict = Object.keys(cell.antiBot.outcomes).reduce(function (s, k) { return s + cell.antiBot.outcomes[k]; }, 0);
         if (cell.antiBot.evaluated > withVerdict) detail += (detail ? ', ' : '') + 'page non chargée ×' + (cell.antiBot.evaluated - withVerdict);
-        row.push(el('td', {}, [statusBadge(cell.antiBot.passRate, detail, cell.antiBot.passRate < 1 ? dominantOutcome(cell.antiBot.outcomes) : null)]));
+        var note = cell.antiBot.passRate < 1 ? dominantOutcome(cell.antiBot.outcomes) + ' · ' + pct(cellDiscretion(cell)) + ' discret' : null;
+        row.push(el('td', {}, [statusBadge(cell.antiBot.passRate, detail, note)]));
       });
-      row.push(el('td', {}, [totalEval ? statusBadge(totalPass / totalEval, totalPass + '/' + totalEval + ' runs') : el('span', { class: 'muted', text: '—' })]));
+      var own = data.cells.filter(function (c) { return c.browser === b && targets.some(function (t) { return t.name === c.target; }); });
+      row.push(el('td', {}, [totalEval ? statusBadge(totalPass / totalEval, totalPass + '/' + totalEval + ' runs non bloqués', pct(discretionOf(own)) + ' discret') : el('span', { class: 'muted', text: '—' })]));
       body.appendChild(el('tr', {}, row));
     });
     table.appendChild(body);
