@@ -133,6 +133,10 @@ td { font-variant-numeric: tabular-nums; }
 .status svg { flex: none; }
 .verdict { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; }
 .verdict .sub { color: var(--text-muted); font-size: 11px; }
+.meter-line { display: inline-flex; align-items: center; gap: 6px; }
+.meter { width: 48px; height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; flex: none; }
+.meter span { display: block; height: 100%; background: var(--text-secondary); }
+.antibot-summary { margin: 0 0 6px; font-weight: 600; }
 
 .drill-controls { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; align-items: center; }
 .drill-controls label { color: var(--text-secondary); font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
@@ -255,7 +259,8 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
   <section>
     <h2>Anti-bot</h2>
-    <p class="hint">Verdict le plus fréquent sur les runs : ✓ passé, ✕ détecté / challenge / bloqué, ! sans verdict (le script de détection n'a pas abouti dans ce navigateur). Sous le verdict, pour les pages qui détaillent leurs contrôles (sannysoft, CreepJS, deviceandbrowserinfo), la part des contrôles passés : un seul contrôle raté suffit à être détecté. Colonne Global : runs passés et score de discrétion, qui moyenne toutes les pages (une page oui/non compte 0 ou 100 %). Survoler une case pour le détail des runs.</p>
+    <p class="antibot-summary" id="antibot-summary"></p>
+    <p class="hint">Chaque case : le <strong>verdict</strong> de la page (✓ passé, ✕ repéré ou bloqué, ! sans verdict : le script de détection n'a pas tourné dans ce navigateur), puis, sur les pages qui détaillent leurs tests (sannysoft, CreepJS, deviceandbrowserinfo), la <strong>barre des contrôles réussis</strong>. Un seul contrôle raté suffit pour être repéré : on peut donc réussir 87 % des contrôles et prendre quand même une croix. Browserscan et Cloudflare ne répondent que oui ou non. Survoler une case pour le détail des runs.</p>
     <div class="card table-wrap"><table id="antibot-table"></table></div>
   </section>
 
@@ -383,7 +388,17 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     var line = el('span', { class: 'status' });
     line.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">' + STATUS_ICONS[level] + '</svg>';
     line.appendChild(document.createTextNode(label));
-    return el('span', { class: 'verdict', title: title || '' }, [line, sub ? el('span', { class: 'sub', text: sub }) : null]);
+    return el('span', { class: 'verdict', title: title || '' }, [line, sub || null]);
+  }
+
+  /** Neutral grey gauge: how far the browser got before being flagged, deliberately not a status color. */
+  function checksMeter(share, suffix) {
+    var fill = el('span');
+    fill.style.width = Math.round(Math.max(0, Math.min(1, share)) * 100) + '%';
+    return el('span', { class: 'meter-line' }, [
+      el('span', { class: 'meter', 'aria-hidden': 'true' }, [fill]),
+      el('span', { class: 'sub', text: pct(share) + ' des contrôles réussis' + (suffix || '') })
+    ]);
   }
 
   function visibleCells() {
@@ -448,7 +463,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   function renderSummary() {
     var table = document.getElementById('summary-table');
     table.replaceChildren();
-    var head = ['Navigateur', 'Runs', 'Succès', 'Anti-bot passé', 'Discrétion', 'Chargement', 'RAM moy.', 'RAM pic', 'CPU moy.', 'Fidélité DOM'];
+    var head = ['Navigateur', 'Runs', 'Succès', 'Anti-bot passé', 'Contrôles réussis', 'Chargement', 'RAM moy.', 'RAM pic', 'CPU moy.', 'Fidélité DOM'];
     table.appendChild(el('thead', {}, [el('tr', {}, head.map(function (h) { return el('th', { text: h }); }))]));
     var body = el('tbody');
     var cells = visibleCells();
@@ -466,7 +481,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         el('td', { text: String(runs) }),
         el('td', { text: pct(successes / runs) }),
         el('td', {}, [abEval ? statusBadge(abPass / abEval, abPass + '/' + abEval + ' runs non bloqués') : el('span', { class: 'muted', text: '—' })]),
-        el('td', { text: pct(discretionOf(own)), title: 'part moyenne des contrôles de détection passés' }),
+        el('td', { text: pct(discretionOf(own)), title: 'part moyenne des contrôles de détection réussis, même quand le navigateur est repéré' }),
         el('td', { text: fmt(mean(own.map(function (c) { return c.loadTimeMs && c.loadTimeMs.median; })), 0, ' ms') }),
         el('td', { text: fmt(mean(own.map(function (c) { return c.memAvgMB && c.memAvgMB.mean; })), 0, ' Mo') }),
         el('td', { text: peak ? fmt(peak, 0, ' Mo') : '—' }),
@@ -511,17 +526,26 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         else if (!dominant) { level = 'critical'; label = 'non chargée'; }
         else { level = dominant === 'unknown' ? 'warning' : 'critical'; label = OUTCOME_LABELS[dominant] || dominant; }
         // Only pages that expose individual checks can say how close to passing the browser came.
-        var sub = t.gradedAntiBot && dominant !== 'unknown' && ab.passed < ab.evaluated ? pct(cellDiscretion(cell)) + ' des contrôles passés' : null;
+        var sub = t.gradedAntiBot && dominant !== 'unknown' && ab.passed < ab.evaluated ? checksMeter(cellDiscretion(cell)) : null;
         row.push(el('td', {}, [verdictBadge(level, label, detail, sub)]));
       });
       var own = data.cells.filter(function (c) { return c.browser === b && targets.some(function (t) { return t.name === c.target; }); });
       var rate = totalEval ? totalPass / totalEval : 0;
       row.push(el('td', {}, [totalEval
-        ? verdictBadge(rate >= 0.8 ? 'good' : rate >= 0.4 ? 'warning' : 'critical', totalPass + '/' + totalEval + ' passés', 'runs ni bloqués ni repérés', 'score de discrétion ' + pct(discretionOf(own)))
+        ? verdictBadge(rate >= 0.8 ? 'good' : rate >= 0.4 ? 'warning' : 'critical', totalPass + '/' + totalEval + ' runs passés', 'runs ni repérés ni bloqués ; la barre moyenne toutes les pages, une page oui/non comptant 0 ou 100 %', checksMeter(discretionOf(own), ', en moyenne'))
         : el('span', { class: 'muted', text: '—' })]));
       body.appendChild(el('tr', {}, row));
     });
     table.appendChild(body);
+
+    var shown = data.cells.filter(function (c) {
+      return c.antiBot && state.browsers.has(c.browser) && targets.some(function (t) { return t.name === c.target; });
+    });
+    var allRuns = shown.reduce(function (s, c) { return s + c.antiBot.evaluated; }, 0);
+    var allPassed = shown.reduce(function (s, c) { return s + c.antiBot.passed; }, 0);
+    document.getElementById('antibot-summary').textContent = allPassed === 0
+      ? 'Aucun navigateur ne passe : les ' + allRuns + ' runs anti-bot sont tous repérés ou bloqués. Les barres montrent jusqu’où chacun tient avant d’être démasqué.'
+      : allPassed + ' runs anti-bot sur ' + allRuns + ' passent sans être repérés.';
   }
 
   var DETAIL_PAGE_SIZE = 25;
@@ -774,9 +798,9 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   // relative axes: per target, score = best / value (lower is better), then averaged over targets.
   // absolute axes: rates already on a 0-1 scale.
   var AXES = [
-    { key: 'antibot', label: 'Anti-bot', kind: 'absolute', help: 'discrétion moyenne face aux pages de détection (part des contrôles passés)',
+    { key: 'antibot', label: 'Anti-bot', kind: 'absolute', help: 'part des contrôles de détection réussis, même quand le navigateur finit repéré',
       value: function (c) { return c.antiBot ? (typeof c.antiBot.meanScore === 'number' ? c.antiBot.meanScore : c.antiBot.passRate) : null; },
-      raw: function (v) { return fmt(v * 100, 0, ' % discret'); } },
+      raw: function (v) { return fmt(v * 100, 0, ' % des contrôles réussis'); } },
     { key: 'speed', label: 'Vitesse', kind: 'relative', help: 'temps de chargement médian (début de navigation → load)',
       value: function (c) { return c.loadTimeMs ? c.loadTimeMs.median : null; },
       raw: function (v) { return fmt(v, 0, ' ms'); } },
