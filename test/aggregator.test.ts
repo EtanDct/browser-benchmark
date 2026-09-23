@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { aggregate, computeStats } from '../src/aggregate/aggregator.js';
+import { aggregate, computeStats, tagSimilarity } from '../src/aggregate/aggregator.js';
 import type { RunRecord } from '../src/runner/types.js';
 
 const environment = { platform: 'linux', osRelease: '6', arch: 'x64', cpuModel: 'cpu', cpuCount: 4, totalMemBytes: 8e9, nodeVersion: 'v22' };
@@ -33,7 +33,29 @@ describe('computeStats', () => {
     assert.equal(stats.median, 3);
     assert.equal(stats.stddev, 3.54);
     assert.equal(stats.p95, 10);
+    // mean 4, sd 3.54, t(4) = 2.776 -> 4 ± 4.39
+    assert.deepEqual(stats.ci95, [-0.39, 8.39]);
+    assert.deepEqual(computeStats([5])!.ci95, [5, 5]);
     assert.equal(computeStats([]), null);
+  });
+});
+
+describe('tagSimilarity', () => {
+  it('is 1 for identical DOMs and drops with missing or extra elements', () => {
+    assert.equal(tagSimilarity({ DIV: 10, P: 5 }, { DIV: 10, P: 5 }), 1);
+    assert.equal(tagSimilarity({ DIV: 10, P: 5 }, { DIV: 10 }), 10 / 15);
+    assert.equal(tagSimilarity({ DIV: 8, IMG: 2 }, { DIV: 10 }), 8 / 12);
+  });
+});
+
+describe('throughput summary', () => {
+  it('derives the memory cost of one more page from the levels', () => {
+    const level = (concurrency: number, memPeakMB: number) => ({ concurrency, pages: 8, successes: 8, durationMs: 1000, pagesPerMinute: 60 * concurrency, memAvgMB: memPeakMB, memPeakMB, cpuAvgPercent: 10 });
+    const report = aggregate([record('a', 'page', 1)], {
+      throughput: [{ schemaVersion: 1, browser: 'a', target: 'page', url: 'local://page', startedAt: '', memoryMetric: 'rss', levels: [level(1, 100), level(2, 120), level(4, 160)], environment }],
+    });
+    assert.equal(report.throughput[0].memPerPageMB, 20);
+    assert.equal(report.throughput[0].bestPagesPerMinute, 240);
   });
 });
 

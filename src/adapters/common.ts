@@ -10,6 +10,7 @@ export interface PageSnapshot {
   /** Visible text: body without script/style/noscript/template, whitespace collapsed. */
   text: string;
   tags: string;
+  tagCounts: Record<string, number>;
   elementCount: number;
   textLength: number;
   navLoadMs?: number;
@@ -26,7 +27,12 @@ export const SNAPSHOT_EXPRESSION = `(() => {
   const d = document;
   const els = d.getElementsByTagName('*');
   const tags = new Array(els.length);
-  for (let i = 0; i < els.length; i++) tags[i] = String(els[i].tagName).toUpperCase();
+  const tagCounts = {};
+  for (let i = 0; i < els.length; i++) {
+    const tag = String(els[i].tagName).toUpperCase();
+    tags[i] = tag;
+    tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+  }
   let text = '';
   if (d.body) {
     try {
@@ -53,6 +59,7 @@ export const SNAPSHOT_EXPRESSION = `(() => {
     html: d.documentElement ? d.documentElement.outerHTML : '',
     text: text,
     tags: tags.join(','),
+    tagCounts: tagCounts,
     elementCount: els.length,
     textLength: text.length,
     navLoadMs: navLoadMs,
@@ -144,6 +151,7 @@ export async function completeNavigation(
       antiBotPassed: antiBot?.passed,
       antiBot,
       domSnapshotHash: hashDomStructure(snapshot.tags),
+      domTagCounts: snapshot.tagCounts ?? undefined,
       domStats: { elementCount: snapshot.elementCount, textLength: snapshot.textLength },
       finalUrl: snapshot.url,
       title: snapshot.title,
@@ -158,6 +166,13 @@ export async function completeNavigation(
     };
   }
 }
+
+/** Resource types a "lite" scraper skips: everything a DOM extraction does not need. */
+export const BLOCKED_RESOURCE_TYPES = new Set(['image', 'stylesheet', 'font', 'media']);
+
+/** Same intent for drivers that can only block by URL (Selenium via CDP Network.setBlockedURLs). */
+export const BLOCKED_URL_PATTERNS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'ico', 'css', 'woff', 'woff2', 'ttf', 'otf', 'mp4', 'webm', 'mp3']
+  .map((ext) => `*.${ext}*`);
 
 export function failedNavigation(startedAt: number, err: unknown): NavigationResult {
   return { success: false, loadTimeMs: Date.now() - startedAt, errorMessage: errorMessage(err) };

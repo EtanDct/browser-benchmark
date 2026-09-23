@@ -54,7 +54,9 @@ describe('adapter registry', () => {
   it('resolves names, aliases and all', () => {
     assert.deepEqual(resolveAdapters(['playwright']).map((a) => a.name), ['playwright-chromium', 'playwright-firefox', 'playwright-webkit']);
     assert.deepEqual(resolveAdapters(['lightpanda', 'puppeteer']).map((a) => a.name), ['puppeteer', 'lightpanda']);
-    assert.equal(resolveAdapters(['all']).length, 6);
+    assert.equal(resolveAdapters(['all']).length, 9);
+    assert.deepEqual(resolveAdapters(['stealth']).map((a) => a.name), ['puppeteer-stealth', 'patchright', 'camoufox']);
+    assert.equal(resolveAdapters(['vanilla']).length, 6);
     assert.throws(() => resolveAdapters(['netscape']), /Unknown browser/);
   });
 });
