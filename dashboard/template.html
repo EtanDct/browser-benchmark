@@ -192,6 +192,10 @@ table.ranking tr.first td { font-weight: 600; }
 .global b { width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
 .note { margin-top: 10px; }
 .stack-top { margin-top: 16px; }
+.empty-state { max-width: 72ch; }
+.empty-state p { margin: 0; color: var(--text-secondary); }
+.empty-state .empty-title { color: var(--text-primary); font-weight: 600; margin-bottom: 6px; }
+.weights label.unmeasured { opacity: .5; }
 code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; background: var(--grid); padding: 1px 5px; border-radius: 4px; }
 .tag {
   font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
@@ -330,6 +334,11 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     <section>
       <h2>Débit en parallèle</h2>
       <p class="hint">Un seul navigateur, N pages qui se partagent une file de chargements (cible : <span id="tp-target"></span>). Montre combien de pages par minute il tient, et ce que coûte en mémoire chaque page ouverte en plus. Se lance avec <code>npm run throughput</code>.</p>
+      <div class="card empty-state" id="tp-empty" hidden>
+        <p class="empty-title">Pas encore de test de débit dans ces résultats</p>
+        <p>Le test ouvre plusieurs pages en parallèle dans un même navigateur (1, 2, 4 puis 8) et mesure les pages par minute et la mémoire. Il s'ajoute à la fin d'une campagne complète, ou se lance seul avec <code>npm run throughput</code>, puis <code>npm run dashboard</code>.</p>
+      </div>
+      <div id="tp-content">
       <div class="grid-2">
         <div class="card">
           <h3>Pages par minute</h3>
@@ -343,6 +352,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         </div>
       </div>
       <div class="card table-wrap stack-top"><table id="tp-table"></table></div>
+      </div>
     </section>
   </div>
 
@@ -350,7 +360,11 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     <section>
       <h2>Évolution d'une campagne à l'autre</h2>
       <p class="hint">Chaque point est une campagne <code>npm run bench</code>, avec la version du navigateur au survol : pour suivre l'effet d'une mise à jour (Lightpanda, Chrome, une variante furtive…).</p>
-      <div class="card">
+      <div class="card empty-state" id="history-empty" hidden>
+        <p class="empty-title">Aucune campagne enregistrée dans l'historique</p>
+        <p>Chaque <code>npm run bench</code> ajoute ici un point par navigateur, avec sa version. Les courbes apparaissent à partir de la deuxième campagne ; la campagne planifiée chaque semaine (workflow <code>campaign.yml</code>) les alimente automatiquement.</p>
+      </div>
+      <div class="card" id="history-content">
         <div class="drill-controls">
           <label>Mesure <select id="history-metric"></select></label>
           <span class="muted" id="history-info"></span>
@@ -942,6 +956,14 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     { id: 'rendering', label: 'Rendu fidèle', weights: { antibot: 0, speed: 1, launch: 0, memory: 1, cpu: 1, network: 0, fidelity: 4, visual: 4, reliability: 3 } }
   ];
 
+  // Axes these results never measured (e.g. bytes or screenshots from an older campaign) are left out
+  // of the table and their weight is disabled, instead of showing a column of "n/d".
+  var MEASURED = {};
+  AXES.forEach(function (a) {
+    MEASURED[a.key] = data.cells.some(function (c) { return num(a.value(c.series || [], c)); });
+  });
+  function measuredAxes() { return AXES.filter(function (a) { return MEASURED[a.key]; }); }
+
   var weights = Object.assign({}, PRESETS[0].weights);
   try {
     var savedWeights = JSON.parse(localStorage.getItem('bench-weights-v2') || 'null');
@@ -1073,7 +1095,11 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         weights[a.key] = Number(input.value);
         onWeightsChanged();
       });
-      box.appendChild(el('label', { title: a.help }, [a.label, input, out]));
+      if (!MEASURED[a.key]) input.disabled = true;
+      box.appendChild(el('label', {
+        class: MEASURED[a.key] ? '' : 'unmeasured',
+        title: MEASURED[a.key] ? a.help : 'pas de donnée dans ces résultats (' + a.help + ')'
+      }, [a.label, input, out]));
     });
     syncWeightInputs();
   }
@@ -1142,7 +1168,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
           : 'Avance fragile : 1er dans ' + fmt(stats.firstShare * 100, 0, ' %') + ' des tirages seulement, ' + runnerUp.browser + ' l’est dans ' + fmt(runnerUp.share * 100, 0, ' %') + '. Plus de runs départageraient.' }));
       }
       var list = el('ul', { class: 'axis-winners' });
-      AXES.forEach(function (a) {
+      measuredAxes().forEach(function (a) {
         if (!weights[a.key]) return;
         var who = best[a.key];
         var row = who ? rows.find(function (r) { return r.browser === who; }) : null;
@@ -1159,7 +1185,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     table.replaceChildren();
     var head = [el('th', { text: '#' }), el('th', { text: 'Navigateur' }), el('th', { text: 'Score global' }),
       el('th', { text: 'Rang probable', title: 'classement refait ' + BOOTSTRAP_ROUNDS + ' fois en tirant au sort les runs de chaque case (bootstrap)' })]
-      .concat(AXES.map(function (a) {
+      .concat(measuredAxes().map(function (a) {
         return el('th', { class: 'axis', title: a.help + (weights[a.key] ? '' : ' (poids 0 : hors score global)'), text: a.label + (weights[a.key] ? ' ×' + weights[a.key] : '') });
       }));
     table.appendChild(el('thead', {}, [el('tr', {}, head)]));
@@ -1175,7 +1201,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         })()]),
         el('td', { class: 'left' }, [rankLabel(boot[r.browser]) || el('span', { class: 'muted', text: '—' })])
       ];
-      AXES.forEach(function (a) {
+      measuredAxes().forEach(function (a) {
         var s = r.score[a.key];
         if (s === null) {
           cells.push(el('td', { class: 'score muted', title: a.label + ' : pas de donnée', text: 'n/d' }));
@@ -1193,7 +1219,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       });
       body.appendChild(el('tr', { class: i === 0 && r.total !== null ? 'first' : '' }, cells));
     });
-    if (!ranking.rows.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(4 + AXES.length), text: 'Aucune donnée pour cette sélection' })]));
+    if (!ranking.rows.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(4 + measuredAxes().length), text: 'Aucune donnée pour cette sélection' })]));
     table.appendChild(body);
 
     var notes = [];
@@ -1212,6 +1238,10 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   }
 
   function renderThroughput() {
+    var none = !(data.throughput || []).length;
+    document.getElementById('tp-empty').hidden = !none;
+    document.getElementById('tp-content').hidden = none;
+    if (none) return;
     var tests = (data.throughput || []).filter(function (t) { return state.browsers.has(t.browser) || data.browsers.indexOf(t.browser) < 0; });
     var info = document.getElementById('tp-target');
     info.textContent = tests.length ? tests.map(function (t) { return t.target; }).filter(function (v, i, a) { return a.indexOf(v) === i; }).join(', ') : 'aucun test';
@@ -1284,6 +1314,9 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
   function renderHistory() {
     var history = data.history || [];
+    document.getElementById('history-empty').hidden = history.length > 0;
+    document.getElementById('history-content').hidden = !history.length;
+    if (!history.length) return;
     var metric = HISTORY_METRICS.find(function (m) { return m.key === document.getElementById('history-metric').value; }) || HISTORY_METRICS[0];
     var browsers = [];
     history.forEach(function (h) { h.browsers.forEach(function (b) { if (browsers.indexOf(b.browser) < 0 && (state.browsers.has(b.browser) || data.browsers.indexOf(b.browser) < 0)) browsers.push(b.browser); }); });
