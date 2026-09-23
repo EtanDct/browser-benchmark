@@ -74,6 +74,7 @@ describe('aggregate', () => {
     assert.equal(cell.antiBot?.evaluated, 3);
     assert.equal(cell.antiBot?.passed, 1);
     assert.equal(cell.antiBot?.meanScore, 0.5);
+    assert.equal(report.targets[0].gradedAntiBot, true);
     assert.deepEqual(cell.antiBot?.outcomes, { passed: 1, challenge: 1 });
     assert.equal(report.browserSummaries[0].antiBotPassRate, 1 / 3);
     assert.deepEqual(cell.errors, ['timeout']);

@@ -80,7 +80,13 @@ export interface AggregatedReport {
   memoryMetrics: MemoryMetric[];
   environment: EnvironmentInfo | null;
   browsers: string[];
-  targets: Array<{ name: string; group: string; url: string }>;
+  targets: Array<{
+    name: string;
+    group: string;
+    url: string;
+    /** The page exposes individual checks, so its anti-bot score is graded rather than pass/fail only. */
+    gradedAntiBot: boolean;
+  }>;
   cells: Cell[];
   browserSummaries: BrowserSummary[];
 }
@@ -220,7 +226,11 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
     };
   });
 
-  const targets = [...new Map(cells.map((c) => [c.target, { name: c.target, group: c.group, url: c.url }])).values()];
+  // Pass/fail pages only ever score 0 or 1; any run in between proves the page grades its checks.
+  const gradedTargets = new Set(
+    records.filter((r) => { const s = r.navigation.antiBot?.score; return s !== undefined && s > 0 && s < 1; }).map((r) => r.target),
+  );
+  const targets = [...new Map(cells.map((c) => [c.target, { name: c.target, group: c.group, url: c.url, gradedAntiBot: gradedTargets.has(c.target) }])).values()];
   const latest = [...records].sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
 
   return {

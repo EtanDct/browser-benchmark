@@ -131,6 +131,8 @@ td { font-variant-numeric: tabular-nums; }
 
 .status { display: inline-flex; align-items: center; gap: 6px; color: var(--text-primary); }
 .status svg { flex: none; }
+.verdict { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.verdict .sub { color: var(--text-muted); font-size: 11px; }
 
 .drill-controls { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; align-items: center; }
 .drill-controls label { color: var(--text-secondary); font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
@@ -253,7 +255,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
   <section>
     <h2>Anti-bot</h2>
-    <p class="hint">Taux de passage (✓ ≥ 80 %, ! 40–80 %, ✕ &lt; 40 %) : part des runs où le navigateur n'a été ni bloqué ni repéré. En cas d'échec, le verdict le plus fréquent (« sans verdict » : le script de détection n'a pas abouti) et la <strong>discrétion</strong> : part des contrôles de détection passés, qui départage les navigateurs même quand aucun ne passe. Survoler une cellule pour le détail.</p>
+    <p class="hint">Verdict le plus fréquent sur les runs : ✓ passé, ✕ détecté / challenge / bloqué, ! sans verdict (le script de détection n'a pas abouti dans ce navigateur). Sous le verdict, pour les pages qui détaillent leurs contrôles (sannysoft, CreepJS, deviceandbrowserinfo), la part des contrôles passés : un seul contrôle raté suffit à être détecté. Colonne Global : runs passés et score de discrétion, qui moyenne toutes les pages (une page oui/non compte 0 ou 100 %). Survoler une case pour le détail des runs.</p>
     <div class="card table-wrap"><table id="antibot-table"></table></div>
   </section>
 
@@ -374,8 +376,14 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
   var OUTCOME_LABELS = { passed: 'passé', challenge: 'challenge', blocked: 'bloqué', detected: 'détecté', unknown: 'sans verdict' };
   function dominantOutcome(outcomes) {
-    var keys = Object.keys(outcomes).sort(function (a, b) { return outcomes[b] - outcomes[a]; });
-    return keys.length ? OUTCOME_LABELS[keys[0]] || keys[0] : 'non chargée';
+    return Object.keys(outcomes).sort(function (a, b) { return outcomes[b] - outcomes[a]; })[0] || null;
+  }
+
+  function verdictBadge(level, label, title, sub) {
+    var line = el('span', { class: 'status' });
+    line.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">' + STATUS_ICONS[level] + '</svg>';
+    line.appendChild(document.createTextNode(label));
+    return el('span', { class: 'verdict', title: title || '' }, [line, sub ? el('span', { class: 'sub', text: sub }) : null]);
   }
 
   function visibleCells() {
@@ -489,16 +497,28 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       targets.forEach(function (t) {
         var cell = data.cells.find(function (c) { return c.browser === b && c.target === t.name; });
         if (!cell || !cell.antiBot) { row.push(el('td', { class: 'muted', text: '—' })); return; }
-        totalEval += cell.antiBot.evaluated;
-        totalPass += cell.antiBot.passed;
-        var detail = Object.keys(cell.antiBot.outcomes).map(function (k) { return k + ' ×' + cell.antiBot.outcomes[k]; }).join(', ');
-        var withVerdict = Object.keys(cell.antiBot.outcomes).reduce(function (s, k) { return s + cell.antiBot.outcomes[k]; }, 0);
-        if (cell.antiBot.evaluated > withVerdict) detail += (detail ? ', ' : '') + 'page non chargée ×' + (cell.antiBot.evaluated - withVerdict);
-        var note = cell.antiBot.passRate < 1 ? dominantOutcome(cell.antiBot.outcomes) + ' · ' + pct(cellDiscretion(cell)) + ' discret' : null;
-        row.push(el('td', {}, [statusBadge(cell.antiBot.passRate, detail, note)]));
+        var ab = cell.antiBot;
+        totalEval += ab.evaluated;
+        totalPass += ab.passed;
+        var detail = Object.keys(ab.outcomes).map(function (k) { return (OUTCOME_LABELS[k] || k) + ' ×' + ab.outcomes[k]; }).join(', ');
+        var withVerdict = Object.keys(ab.outcomes).reduce(function (s, k) { return s + ab.outcomes[k]; }, 0);
+        if (ab.evaluated > withVerdict) detail += (detail ? ', ' : '') + 'page non chargée ×' + (ab.evaluated - withVerdict);
+
+        var dominant = dominantOutcome(ab.outcomes);
+        var level, label;
+        if (ab.passed === ab.evaluated) { level = 'good'; label = 'passé'; }
+        else if (ab.passed > 0) { level = 'warning'; label = 'passé ' + ab.passed + '/' + ab.evaluated; }
+        else if (!dominant) { level = 'critical'; label = 'non chargée'; }
+        else { level = dominant === 'unknown' ? 'warning' : 'critical'; label = OUTCOME_LABELS[dominant] || dominant; }
+        // Only pages that expose individual checks can say how close to passing the browser came.
+        var sub = t.gradedAntiBot && dominant !== 'unknown' && ab.passed < ab.evaluated ? pct(cellDiscretion(cell)) + ' des contrôles passés' : null;
+        row.push(el('td', {}, [verdictBadge(level, label, detail, sub)]));
       });
       var own = data.cells.filter(function (c) { return c.browser === b && targets.some(function (t) { return t.name === c.target; }); });
-      row.push(el('td', {}, [totalEval ? statusBadge(totalPass / totalEval, totalPass + '/' + totalEval + ' runs non bloqués', pct(discretionOf(own)) + ' discret') : el('span', { class: 'muted', text: '—' })]));
+      var rate = totalEval ? totalPass / totalEval : 0;
+      row.push(el('td', {}, [totalEval
+        ? verdictBadge(rate >= 0.8 ? 'good' : rate >= 0.4 ? 'warning' : 'critical', totalPass + '/' + totalEval + ' passés', 'runs ni bloqués ni repérés', 'score de discrétion ' + pct(discretionOf(own)))
+        : el('span', { class: 'muted', text: '—' })]));
       body.appendChild(el('tr', {}, row));
     });
     table.appendChild(body);
