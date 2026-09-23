@@ -18,6 +18,8 @@ export interface Target {
   settleMs: number;
   challengeWaitMs: number;
   antiBot?: AntiBotRule;
+  /** Screenshot it for visual comparison. Defaults to local:// pages only: live sites change between runs. */
+  visual: boolean;
 }
 
 interface TargetsFile {
@@ -62,6 +64,7 @@ export function loadTargets(configFile: string): Target[] {
       timeoutMs: raw.timeoutMs ?? defaults.timeoutMs,
       settleMs: raw.settleMs ?? defaults.settleMs,
       challengeWaitMs: raw.challengeWaitMs ?? defaults.challengeWaitMs,
+      visual: raw.visual ?? raw.url.startsWith('local://'),
       antiBot: raw.antiBot,
     });
   }

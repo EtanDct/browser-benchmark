@@ -191,6 +191,17 @@ table.ranking tr.first td { font-weight: 600; }
 .global .bar span { display: block; height: 100%; background: var(--series-1); border-radius: 4px; }
 .global b { width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
 .note { margin-top: 10px; }
+.stack-top { margin-top: 16px; }
+code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; background: var(--grid); padding: 1px 5px; border-radius: 4px; }
+.tag {
+  font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-secondary); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px;
+}
+.rank-prob { display: inline-flex; flex-direction: column; gap: 1px; }
+.rank-prob .sub { color: var(--text-muted); font-size: 11px; }
+.confidence { margin: -6px 0 14px; font-size: 13px; }
+.confidence.solid { color: var(--text-secondary); }
+.confidence.fragile { color: var(--text-primary); font-weight: 600; }
 
 th button.sort {
   font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; white-space: nowrap;
@@ -218,6 +229,8 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   <nav class="tabs" role="tablist" aria-label="Vues">
     <button type="button" role="tab" id="tab-ranking" aria-controls="view-ranking" aria-selected="true">Classement</button>
     <button type="button" role="tab" id="tab-details" aria-controls="view-details" aria-selected="false">Détails</button>
+    <button type="button" role="tab" id="tab-throughput" aria-controls="view-throughput" aria-selected="false">Débit</button>
+    <button type="button" role="tab" id="tab-history" aria-controls="view-history" aria-selected="false">Historique</button>
   </nav>
 
   <div class="filters" role="group" aria-label="Filtres">
@@ -313,6 +326,40 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   </section>
   </div>
 
+  <div id="view-throughput" role="tabpanel" aria-labelledby="tab-throughput" hidden>
+    <section>
+      <h2>Débit en parallèle</h2>
+      <p class="hint">Un seul navigateur, N pages qui se partagent une file de chargements (cible : <span id="tp-target"></span>). Montre combien de pages par minute il tient, et ce que coûte en mémoire chaque page ouverte en plus. Se lance avec <code>npm run throughput</code>.</p>
+      <div class="grid-2">
+        <div class="card">
+          <h3>Pages par minute</h3>
+          <p class="sub">Selon le nombre de pages en parallèle (plus haut = mieux)</p>
+          <div class="chart-box"><canvas id="tp-rate" aria-label="Pages par minute selon le parallélisme"></canvas></div>
+        </div>
+        <div class="card">
+          <h3>Mémoire au pic</h3>
+          <p class="sub">En Mo, selon le nombre de pages en parallèle</p>
+          <div class="chart-box"><canvas id="tp-mem" aria-label="Mémoire au pic selon le parallélisme"></canvas></div>
+        </div>
+      </div>
+      <div class="card table-wrap stack-top"><table id="tp-table"></table></div>
+    </section>
+  </div>
+
+  <div id="view-history" role="tabpanel" aria-labelledby="tab-history" hidden>
+    <section>
+      <h2>Évolution d'une campagne à l'autre</h2>
+      <p class="hint">Chaque point est une campagne <code>npm run bench</code>, avec la version du navigateur au survol : pour suivre l'effet d'une mise à jour (Lightpanda, Chrome, une variante furtive…).</p>
+      <div class="card">
+        <div class="drill-controls">
+          <label>Mesure <select id="history-metric"></select></label>
+          <span class="muted" id="history-info"></span>
+        </div>
+        <div class="chart-box"><canvas id="history-chart" aria-label="Évolution de la mesure par campagne"></canvas></div>
+      </div>
+    </section>
+  </div>
+
   <footer id="footer"></footer>
 </main>
 
@@ -322,17 +369,48 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   'use strict';
   var data = JSON.parse(document.getElementById('bench-data').textContent);
 
-  // Color follows the browser, never its position in the current filter.
-  var KNOWN_ORDER = ['puppeteer', 'playwright-chromium', 'playwright-firefox', 'playwright-webkit', 'lightpanda', 'selenium-chrome'];
+  // Color = engine family (fixed slot, follows the browser whatever the filters); texture = variant:
+  // stealth builds hatched, lite (resources blocked) faded. Keeps 9 browsers x 2 modes within 8 hues.
+  var FAMILY_OF = { 'puppeteer-stealth': 'puppeteer', patchright: 'playwright-chromium', camoufox: 'playwright-firefox' };
+  var FAMILY_ORDER = ['puppeteer', 'playwright-chromium', 'playwright-firefox', 'playwright-webkit', 'lightpanda', 'selenium-chrome'];
+  var metaOf = {};
+  data.cells.forEach(function (c) { metaOf[c.browser] = { adapter: c.adapter || c.browser, mode: c.mode || 'full', stealth: !!c.stealth }; });
+  (data.throughput || []).forEach(function (t) { if (!metaOf[t.browser]) metaOf[t.browser] = { adapter: t.browser, mode: 'full', stealth: !!t.stealth }; });
+  function familyOf(key) { var adapter = (metaOf[key] || {}).adapter || key; return FAMILY_OF[adapter] || adapter; }
+  function variantOf(key) { var m = metaOf[key] || {}; return m.mode === 'lite' ? 'lite' : m.stealth ? 'stealth' : 'plain'; }
   var slotOf = {};
-  KNOWN_ORDER.forEach(function (name, i) { slotOf[name] = i + 1; });
-  var nextSlot = KNOWN_ORDER.length + 1;
-  data.browsers.forEach(function (b) { if (!slotOf[b]) slotOf[b] = nextSlot <= 8 ? nextSlot++ : 'other'; });
-  function slotRank(b) { return slotOf[b] === 'other' ? 99 : slotOf[b]; }
-  data.browsers.sort(function (a, b) { return slotRank(a) - slotRank(b) || a.localeCompare(b); });
+  FAMILY_ORDER.forEach(function (name, i) { slotOf[name] = i + 1; });
+  var nextSlot = FAMILY_ORDER.length + 1;
+  Object.keys(metaOf).concat(data.browsers).forEach(function (b) { var f = familyOf(b); if (!slotOf[f]) slotOf[f] = nextSlot <= 8 ? nextSlot++ : 'other'; });
+  function sortKey(b) { var s = slotOf[familyOf(b)]; return (s === 'other' ? 99 : s) * 10 + { plain: 0, stealth: 1, lite: 2 }[variantOf(b)]; }
+  data.browsers.sort(function (a, b) { return sortKey(a) - sortKey(b) || a.localeCompare(b); });
 
   function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
-  function colorOf(browser) { return css('--series-' + slotOf[browser]); }
+  function colorOf(browser) { return css('--series-' + slotOf[familyOf(browser)]); }
+  function withAlpha(hex, alpha) {
+    var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+    return m ? 'rgba(' + parseInt(m[1], 16) + ',' + parseInt(m[2], 16) + ',' + parseInt(m[3], 16) + ',' + alpha + ')' : hex;
+  }
+  function hatch(color) {
+    var canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 8;
+    var g = canvas.getContext('2d');
+    g.fillStyle = withAlpha(color, 0.3);
+    g.fillRect(0, 0, 8, 8);
+    g.strokeStyle = color;
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(0, 8); g.lineTo(8, 0);
+    g.moveTo(-2, 2); g.lineTo(2, -2);
+    g.moveTo(6, 10); g.lineTo(10, 6);
+    g.stroke();
+    return g.createPattern(canvas, 'repeat');
+  }
+  /** Chart.js fill for a browser: solid, hatched (stealth) or faded (lite). */
+  function fillOf(browser) {
+    var color = colorOf(browser), variant = variantOf(browser);
+    return variant === 'stealth' ? hatch(color) : variant === 'lite' ? withAlpha(color, 0.4) : color;
+  }
 
   var state = { browsers: new Set(data.browsers), targets: new Set(data.targets.map(function (t) { return t.name; })) };
   var charts = {};
@@ -358,11 +436,16 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   }
   function swatch(browser) {
     var s = el('span', { class: 'swatch' });
-    s.style.background = colorOf(browser);
+    var color = colorOf(browser), variant = variantOf(browser);
+    if (variant === 'stealth') s.style.background = 'repeating-linear-gradient(135deg, ' + color + ' 0 2px, ' + withAlpha(color, 0.3) + ' 2px 4px)';
+    else if (variant === 'lite') { s.style.background = withAlpha(color, 0.4); s.style.boxShadow = 'inset 0 0 0 1.5px ' + color; }
+    else s.style.background = color;
     return s;
   }
+  var VARIANT_TAGS = { stealth: 'furtif', lite: 'lite' };
   function browserLabel(browser, version) {
-    return el('span', { class: 'name' }, [swatch(browser), browser, version ? el('span', { class: 'version', text: version }) : null]);
+    var tag = VARIANT_TAGS[variantOf(browser)];
+    return el('span', { class: 'name' }, [swatch(browser), browser, tag ? el('span', { class: 'tag', text: tag }) : null, version ? el('span', { class: 'version', text: version }) : null]);
   }
 
   var STATUS_ICONS = {
@@ -463,7 +546,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   function renderSummary() {
     var table = document.getElementById('summary-table');
     table.replaceChildren();
-    var head = ['Navigateur', 'Runs', 'Succès', 'Anti-bot passé', 'Contrôles réussis', 'Chargement', 'RAM moy.', 'RAM pic', 'CPU moy.', 'Fidélité DOM'];
+    var head = ['Navigateur', 'Runs', 'Succès', 'Anti-bot passé', 'Contrôles réussis', 'Chargement', 'RAM moy.', 'RAM pic', 'CPU moy.', 'Réseau', 'Fidélité DOM'];
     table.appendChild(el('thead', {}, [el('tr', {}, head.map(function (h) { return el('th', { text: h }); }))]));
     var body = el('tbody');
     var cells = visibleCells();
@@ -486,7 +569,8 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         el('td', { text: fmt(mean(own.map(function (c) { return c.memAvgMB && c.memAvgMB.mean; })), 0, ' Mo') }),
         el('td', { text: peak ? fmt(peak, 0, ' Mo') : '—' }),
         el('td', { text: fmt(mean(own.map(function (c) { return c.cpuAvgPercent && c.cpuAvgPercent.mean; })), 0, ' %') }),
-        el('td', { text: pct(mean(own.map(function (c) { return c.fidelity && c.fidelity.matchRate; }))) })
+        el('td', { text: fmt(mean(own.map(function (c) { return c.networkMB && c.networkMB.mean; })), 2, ' Mo'), title: 'Mo téléchargés par page distante, mesurés par le proxy' }),
+        el('td', { text: pct(mean(own.map(function (c) { return c.fidelity && c.fidelity.similarity; }))), title: 'similarité moyenne du DOM avec le consensus des navigateurs' })
       ]));
     });
     if (!body.children.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(head.length), text: 'Aucune donnée pour cette sélection' })]));
@@ -558,14 +642,25 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     { key: 'target', label: 'Cible', dir: 1, value: function (c) { return c.target; }, render: function (c) { return el('td', { class: 'left', title: c.url, text: c.target }); } },
     { key: 'success', label: 'Succès', dir: -1, value: function (c) { return c.successRate; }, render: function (c) { return el('td', { text: c.successes + '/' + c.runs + (c.timeouts ? ' (' + c.timeouts + ' timeout)' : '') }); } },
     { key: 'load', label: 'Chargement méd.', dir: 1, value: function (c) { return stat(c.loadTimeMs, 'median'); }, render: function (c) { return el('td', { text: fmt(stat(c.loadTimeMs, 'median'), 0, ' ms') }); } },
-    { key: 'mean', label: 'moy. ± σ', dir: 1, value: function (c) { return stat(c.loadTimeMs, 'mean'); }, render: function (c) { return el('td', { text: c.loadTimeMs ? fmt(c.loadTimeMs.mean, 0) + ' ± ' + fmt(c.loadTimeMs.stddev, 0) : '—' }); } },
+    { key: 'mean', label: 'moy. [IC 95 %]', dir: 1, value: function (c) { return stat(c.loadTimeMs, 'mean'); }, render: function (c) {
+      var s = c.loadTimeMs;
+      return el('td', { title: s ? 'écart-type ' + fmt(s.stddev, 0) + ' ms sur ' + s.n + ' runs' : '', text: s ? fmt(s.mean, 0) + (s.ci95 ? ' [' + fmt(Math.max(0, s.ci95[0]), 0) + '–' + fmt(s.ci95[1], 0) + ']' : ' ± ' + fmt(s.stddev, 0)) : '—' });
+    } },
     { key: 'p95', label: 'p95', dir: 1, value: function (c) { return stat(c.loadTimeMs, 'p95'); }, render: function (c) { return el('td', { text: fmt(stat(c.loadTimeMs, 'p95'), 0, ' ms') }); } },
     { key: 'launch', label: 'Lancement', dir: 1, value: function (c) { return stat(c.launchTimeMs, 'median'); }, render: function (c) { return el('td', { text: fmt(stat(c.launchTimeMs, 'median'), 0, ' ms') }); } },
     { key: 'memAvg', label: 'RAM moy.', dir: 1, value: function (c) { return stat(c.memAvgMB, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.memAvgMB, 'mean'), 0, ' Mo') }); } },
     { key: 'memPeak', label: 'RAM pic', dir: 1, value: function (c) { return stat(c.memPeakMB, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.memPeakMB, 'mean'), 0, ' Mo') }); } },
     { key: 'cpuAvg', label: 'CPU moy.', dir: 1, value: function (c) { return stat(c.cpuAvgPercent, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.cpuAvgPercent, 'mean'), 0, ' %') }); } },
     { key: 'cpuPeak', label: 'CPU pic', dir: 1, value: function (c) { return stat(c.cpuPeakPercent, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.cpuPeakPercent, 'mean'), 0, ' %') }); } },
-    { key: 'fidelity', label: 'Fidélité', dir: -1, value: function (c) { return stat(c.fidelity, 'matchRate'); }, render: function (c) { var f = c.fidelity; return el('td', { text: f ? pct(f.matchRate) + (f.distinctHashes > 1 ? ' (' + f.distinctHashes + ' variantes)' : '') : '—' }); } },
+    { key: 'network', label: 'Réseau', dir: 1, value: function (c) { return stat(c.networkMB, 'median'); }, render: function (c) { return el('td', { text: c.networkMB ? fmt(c.networkMB.median, 2, ' Mo') : '—' }); } },
+    { key: 'fidelity', label: 'DOM similaire', dir: -1, value: function (c) { return stat(c.fidelity, 'similarity'); }, render: function (c) {
+      var f = c.fidelity;
+      return el('td', { title: f ? 'structure identique au consensus dans ' + pct(f.matchRate) + ' des runs' + (f.distinctHashes > 1 ? ', ' + f.distinctHashes + ' variantes' : '') : '', text: f ? pct(typeof f.similarity === 'number' ? f.similarity : f.matchRate) : '—' });
+    } },
+    { key: 'visual', label: 'Rendu visuel', dir: -1, value: function (c) { return c.visual ? c.visual.similarity : null; }, render: function (c) {
+      var v = c.visual;
+      return el('td', { title: v ? (v.isReference ? 'référence de comparaison' : 'pixels identiques à la capture de ' + v.reference) : 'pas de capture (page distante ou navigateur sans rendu)', text: v ? (v.isReference ? 'référence' : pct(v.similarity)) : '—' });
+    } },
     { key: 'elements', label: 'Éléments DOM', dir: -1, value: function (c) { return stat(c.fidelity, 'elementCountMedian'); }, render: function (c) { var f = c.fidelity; return el('td', { text: f ? fmt(f.elementCountMedian, 0) + ' / ' + fmt(f.consensusElementCount, 0) : '—', title: 'médiane de ce navigateur / consensus' }); } },
     { key: 'errors', label: 'Erreurs', dir: -1, value: function (c) { return c.errors.length; }, render: function (c) { return el('td', { class: 'err', title: c.errors.join('\n'), text: c.errors[0] || '' }); } }
   ];
@@ -671,7 +766,9 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
           var c = data.cells.find(function (x) { return x.browser === b && x.target === t.name; });
           return c && c.loadTimeMs ? c.loadTimeMs.median : null;
         }),
-        backgroundColor: colorOf(b),
+        backgroundColor: fillOf(b),
+        borderColor: colorOf(b),
+        borderWidth: variantOf(b) === 'plain' ? 0 : 1,
         borderRadius: { topLeft: 4, topRight: 4 },
         borderSkipped: 'start',
         barPercentage: 0.88,
@@ -706,7 +803,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       data: {
         labels: browsers,
         datasets: [
-          { label: 'Moyenne', data: avg, backgroundColor: browsers.map(colorOf), borderRadius: { topLeft: 4, topRight: 4 }, borderSkipped: 'start', barPercentage: 0.6 },
+          { label: 'Moyenne', data: avg, backgroundColor: browsers.map(fillOf), borderColor: browsers.map(colorOf), borderWidth: browsers.map(function (b) { return variantOf(b) === 'plain' ? 0 : 1; }), borderRadius: { topLeft: 4, topRight: 4 }, borderSkipped: 'start', barPercentage: 0.6 },
           { label: 'Pic moyen', type: 'line', data: peak, showLine: false, pointStyle: 'rectRot', pointRadius: 6, pointHoverRadius: 8, pointBackgroundColor: css('--text-primary'), pointBorderColor: css('--surface-1'), pointBorderWidth: 2 }
         ]
       },
@@ -795,51 +892,71 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   });
 
   // ---------- ranking ----------
-  // relative axes: per target, score = best / value (lower is better), then averaged over targets.
-  // absolute axes: rates already on a 0-1 scale.
+  function num(v) { return typeof v === 'number' && isFinite(v); }
+  function median(values) {
+    var s = values.filter(num).sort(function (a, b) { return a - b; });
+    if (!s.length) return null;
+    var m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+  function meanOf(values) { var v = values.filter(num); return v.length ? v.reduce(function (a, b) { return a + b; }, 0) / v.length : null; }
+
+  // Every axis is computed from the runs of a cell, so the bootstrap can recompute it on resampled runs.
+  // relative: per target, score = best / value (lower is better), then averaged over targets.
+  // absolute: rates already on a 0-1 scale.
   var AXES = [
     { key: 'antibot', label: 'Anti-bot', kind: 'absolute', help: 'part des contrôles de détection réussis, même quand le navigateur finit repéré',
-      value: function (c) { return c.antiBot ? (typeof c.antiBot.meanScore === 'number' ? c.antiBot.meanScore : c.antiBot.passRate) : null; },
-      raw: function (v) { return fmt(v * 100, 0, ' % des contrôles réussis'); } },
+      value: function (runs) { return meanOf(runs.map(function (r) { return r.abScore; })); },
+      raw: function (v) { return fmt(v * 100, 0, ' % des contrôles'); } },
     { key: 'speed', label: 'Vitesse', kind: 'relative', help: 'temps de chargement médian (début de navigation → load)',
-      value: function (c) { return c.loadTimeMs ? c.loadTimeMs.median : null; },
+      value: function (runs) { return median(runs.filter(function (r) { return r.success; }).map(function (r) { return r.loadTimeMs; })); },
       raw: function (v) { return fmt(v, 0, ' ms'); } },
     { key: 'launch', label: 'Démarrage', kind: 'relative', help: 'temps de lancement du navigateur',
-      value: function (c) { return c.launchTimeMs ? c.launchTimeMs.median : null; },
+      value: function (runs) { return median(runs.map(function (r) { return r.launchMs; })); },
       raw: function (v) { return fmt(v, 0, ' ms'); } },
     { key: 'memory', label: 'Mémoire', kind: 'relative', help: 'mémoire moyenne pendant le run',
-      value: function (c) { return c.memAvgMB ? c.memAvgMB.mean : null; },
+      value: function (runs) { return meanOf(runs.map(function (r) { return r.memAvgMB; })); },
       raw: function (v) { return fmt(v, 0, ' Mo'); } },
     // +5 points of CPU on both sides so a near-idle 0-1 % browser does not crush everyone else to 0.
     { key: 'cpu', label: 'CPU', kind: 'relative', epsilon: 5, help: 'CPU moyen, en % d’un cœur',
-      value: function (c) { return c.cpuAvgPercent ? c.cpuAvgPercent.mean : null; },
+      value: function (runs) { return meanOf(runs.map(function (r) { return r.cpuAvg; })); },
       raw: function (v) { return fmt(v, 0, ' %'); } },
-    { key: 'fidelity', label: 'Fidélité', kind: 'absolute', help: 'part des runs dont le DOM est identique au consensus inter-navigateurs',
-      value: function (c) { return c.fidelity ? c.fidelity.matchRate : null; },
-      raw: function (v) { return pct(v) + ' identique'; } },
+    { key: 'network', label: 'Réseau', kind: 'relative', epsilon: 0.05, help: 'Mo téléchargés par page (pages distantes, mesurés par le proxy)',
+      value: function (runs) { return median(runs.filter(function (r) { return r.success; }).map(function (r) { return r.bytesDownMB; })); },
+      raw: function (v) { return fmt(v, 2, ' Mo'); } },
+    { key: 'fidelity', label: 'Fidélité DOM', kind: 'absolute', help: 'similarité du DOM avec celui que construisent la plupart des navigateurs (nombre d’éléments par balise)',
+      value: function (runs) { return meanOf(runs.map(function (r) { return r.domSimilarity; })); },
+      raw: function (v) { return pct(v) + ' similaire'; } },
+    { key: 'visual', label: 'Rendu visuel', kind: 'absolute', help: 'pixels identiques à la capture du navigateur de référence (pages locales)',
+      value: function (runs, cell) { return cell.visual ? cell.visual.similarity : null; },
+      raw: function (v) { return pct(v) + ' des pixels'; } },
     { key: 'reliability', label: 'Fiabilité', kind: 'absolute', help: 'part des runs réussis (chargement + capture)',
-      value: function (c) { return c.successRate; },
+      value: function (runs) { return runs.length ? runs.filter(function (r) { return r.success; }).length / runs.length : null; },
       raw: function (v) { return pct(v) + ' réussis'; } }
   ];
 
   var PRESETS = [
-    { id: 'balanced', label: 'Équilibré', weights: { antibot: 1, speed: 1, launch: 1, memory: 1, cpu: 1, fidelity: 1, reliability: 1 } },
-    { id: 'stealth', label: 'Scraping discret', weights: { antibot: 5, speed: 1, launch: 0, memory: 1, cpu: 1, fidelity: 2, reliability: 3 } },
-    { id: 'volume', label: 'Performance / volume', weights: { antibot: 0, speed: 3, launch: 2, memory: 3, cpu: 2, fidelity: 1, reliability: 2 } },
-    { id: 'rendering', label: 'Rendu fidèle', weights: { antibot: 0, speed: 1, launch: 0, memory: 1, cpu: 1, fidelity: 5, reliability: 3 } }
+    { id: 'balanced', label: 'Équilibré', weights: { antibot: 1, speed: 1, launch: 1, memory: 1, cpu: 1, network: 1, fidelity: 1, visual: 1, reliability: 1 } },
+    { id: 'stealth', label: 'Scraping discret', weights: { antibot: 5, speed: 1, launch: 0, memory: 1, cpu: 1, network: 1, fidelity: 2, visual: 0, reliability: 3 } },
+    { id: 'volume', label: 'Performance / volume', weights: { antibot: 0, speed: 3, launch: 2, memory: 3, cpu: 2, network: 2, fidelity: 1, visual: 0, reliability: 2 } },
+    { id: 'rendering', label: 'Rendu fidèle', weights: { antibot: 0, speed: 1, launch: 0, memory: 1, cpu: 1, network: 0, fidelity: 4, visual: 4, reliability: 3 } }
   ];
 
   var weights = Object.assign({}, PRESETS[0].weights);
   try {
-    var savedWeights = JSON.parse(localStorage.getItem('bench-weights') || 'null');
+    var savedWeights = JSON.parse(localStorage.getItem('bench-weights-v2') || 'null');
     if (savedWeights) AXES.forEach(function (a) { if (typeof savedWeights[a.key] === 'number') weights[a.key] = savedWeights[a.key]; });
   } catch (e) { /* storage unavailable: defaults */ }
 
-  function computeRanking() {
+  function computeRanking(runsOf) {
     var cells = visibleCells();
     var browsers = visibleBrowsers().filter(function (b) { return cells.some(function (c) { return c.browser === b; }); });
     var targets = [];
-    cells.forEach(function (c) { if (targets.indexOf(c.target) < 0) targets.push(c.target); });
+    var byKey = {};
+    cells.forEach(function (c) {
+      if (targets.indexOf(c.target) < 0) targets.push(c.target);
+      byKey[c.browser + '\u0000' + c.target] = c;
+    });
     var rows = browsers.map(function (b) { return { browser: b, score: {}, raw: {}, targets: {} }; });
 
     AXES.forEach(function (axis) {
@@ -848,9 +965,10 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       targets.forEach(function (t) {
         var entries = [];
         browsers.forEach(function (b) {
-          var cell = cells.find(function (c) { return c.browser === b && c.target === t; });
-          var v = cell ? axis.value(cell) : null;
-          if (typeof v === 'number' && isFinite(v)) entries.push({ browser: b, v: v });
+          var cell = byKey[b + '\u0000' + t];
+          if (!cell) return;
+          var v = axis.value(runsOf(cell), cell);
+          if (num(v)) entries.push({ browser: b, v: v });
         });
         if (axis.kind === 'relative') {
           if (entries.length < 2) return;
@@ -882,6 +1000,50 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     return { rows: rows, targets: targets, cells: cells };
   }
 
+  // Seeded so the probabilities do not flicker from one render to the next.
+  function seededRandom(seed) {
+    return function () {
+      seed = (seed + 0x6D2B79F5) | 0;
+      var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  var BOOTSTRAP_ROUNDS = 200;
+  /**
+   * Redo the whole ranking on runs drawn with replacement in every cell: how often each browser
+   * comes first, and the range of ranks it lands in. A gap the runs cannot support shows up as a split.
+   */
+  function bootstrapRanks(browsers) {
+    var random = seededRandom(20260923);
+    var ranks = {};
+    browsers.forEach(function (b) { ranks[b] = []; });
+    for (var i = 0; i < BOOTSTRAP_ROUNDS; i++) {
+      var drawn = new Map();
+      var result = computeRanking(function (cell) {
+        var runs = cell.series;
+        if (runs.length < 2) return runs;
+        if (!drawn.has(cell)) drawn.set(cell, runs.map(function () { return runs[Math.floor(random() * runs.length)]; }));
+        return drawn.get(cell);
+      });
+      result.rows.filter(function (r) { return r.total !== null; }).forEach(function (r, index) {
+        if (ranks[r.browser]) ranks[r.browser].push(index + 1);
+      });
+    }
+    var out = {};
+    browsers.forEach(function (b) {
+      var list = ranks[b].slice().sort(function (x, y) { return x - y; });
+      if (!list.length) return;
+      out[b] = {
+        firstShare: list.filter(function (r) { return r === 1; }).length / list.length,
+        low: list[Math.floor(0.05 * (list.length - 1))],
+        high: list[Math.ceil(0.95 * (list.length - 1))]
+      };
+    });
+    return out;
+  }
+
   function bestPerAxis(rows) {
     var best = {};
     AXES.forEach(function (a) {
@@ -900,7 +1062,6 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       var btn = el('button', { type: 'button', 'data-preset': p.id, text: p.label });
       btn.addEventListener('click', function () {
         weights = Object.assign({}, p.weights);
-        syncWeightInputs();
         onWeightsChanged();
       });
       presets.appendChild(btn);
@@ -910,7 +1071,6 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       var out = el('output', { for: 'w-' + a.key });
       input.addEventListener('input', function () {
         weights[a.key] = Number(input.value);
-        out.textContent = input.value;
         onWeightsChanged();
       });
       box.appendChild(el('label', { title: a.help }, [a.label, input, out]));
@@ -932,7 +1092,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
   function onWeightsChanged() {
     syncWeightInputs();
-    try { localStorage.setItem('bench-weights', JSON.stringify(weights)); } catch (e) { /* ignore */ }
+    try { localStorage.setItem('bench-weights-v2', JSON.stringify(weights)); } catch (e) { /* ignore */ }
     renderRanking();
   }
 
@@ -945,9 +1105,18 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     };
   }
 
+  function rankLabel(stats) {
+    if (!stats) return null;
+    return el('span', { class: 'rank-prob' }, [
+      el('b', { text: stats.firstShare >= 0.995 ? '1er : 100 %' : '1er : ' + fmt(stats.firstShare * 100, 0, ' %') }),
+      el('span', { class: 'sub', title: 'rang dans 90 % des tirages', text: stats.low === stats.high ? 'rang ' + stats.low : 'rang ' + stats.low + '–' + stats.high })
+    ]);
+  }
+
   function renderRanking() {
-    var ranking = computeRanking();
+    var ranking = computeRanking(function (cell) { return cell.series; });
     var rows = ranking.rows.filter(function (r) { return r.total !== null; });
+    var boot = bootstrapRanks(rows.map(function (r) { return r.browser; }));
     var best = bestPerAxis(rows);
     var winnerBox = document.getElementById('winner');
     winnerBox.replaceChildren();
@@ -963,6 +1132,15 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         el('span', { class: 'winner-score' }, [fmt(w.total, 0), el('small', { text: ' / 100' })])
       ]));
       winnerBox.appendChild(el('p', { class: 'winner-sub', text: (others.length ? 'devant ' + others.join(' et ') + ' · ' : '') + ranking.targets.length + ' cibles, ' + runs + ' runs' }));
+      var stats = boot[w.browser];
+      if (stats && rows.length > 1) {
+        var runnerUp = rows.slice(1).map(function (r) { return { browser: r.browser, share: boot[r.browser] ? boot[r.browser].firstShare : 0 }; })
+          .sort(function (a, b) { return b.share - a.share; })[0];
+        var solid = stats.firstShare >= 0.9;
+        winnerBox.appendChild(el('p', { class: 'confidence ' + (solid ? 'solid' : 'fragile'), text: solid
+          ? 'Avance solide : 1er dans ' + fmt(stats.firstShare * 100, 0, ' %') + ' des ' + BOOTSTRAP_ROUNDS + ' tirages des runs.'
+          : 'Avance fragile : 1er dans ' + fmt(stats.firstShare * 100, 0, ' %') + ' des tirages seulement, ' + runnerUp.browser + ' l’est dans ' + fmt(runnerUp.share * 100, 0, ' %') + '. Plus de runs départageraient.' }));
+      }
       var list = el('ul', { class: 'axis-winners' });
       AXES.forEach(function (a) {
         if (!weights[a.key]) return;
@@ -970,7 +1148,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         var row = who ? rows.find(function (r) { return r.browser === who; }) : null;
         list.appendChild(el('li', {}, [
           el('span', { class: 'axis', text: a.label }),
-          who ? el('span', { class: 'name' }, [swatch(who), who]) : el('span', { class: 'muted', text: 'égalité' }),
+          who ? el('span', { class: 'name' }, [swatch(who), who]) : el('span', { class: 'muted', text: rows.some(function (r) { return r.score[a.key] !== null; }) ? 'égalité' : 'non mesuré' }),
           row ? el('span', { class: 'muted', text: a.raw(row.raw[a.key]) }) : null
         ]));
       });
@@ -979,7 +1157,8 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
     var table = document.getElementById('ranking-table');
     table.replaceChildren();
-    var head = [el('th', { text: '#' }), el('th', { text: 'Navigateur' }), el('th', { text: 'Score global' })]
+    var head = [el('th', { text: '#' }), el('th', { text: 'Navigateur' }), el('th', { text: 'Score global' }),
+      el('th', { text: 'Rang probable', title: 'classement refait ' + BOOTSTRAP_ROUNDS + ' fois en tirant au sort les runs de chaque case (bootstrap)' })]
       .concat(AXES.map(function (a) {
         return el('th', { class: 'axis', title: a.help + (weights[a.key] ? '' : ' (poids 0 : hors score global)'), text: a.label + (weights[a.key] ? ' ×' + weights[a.key] : '') });
       }));
@@ -993,7 +1172,8 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
           var bar = el('span', { class: 'bar' }, [el('span')]);
           bar.firstChild.style.width = Math.max(0, Math.min(100, r.total)) + '%';
           return el('span', { class: 'global' }, [el('b', { text: fmt(r.total, 0) }), bar]);
-        })()])
+        })()]),
+        el('td', { class: 'left' }, [rankLabel(boot[r.browser]) || el('span', { class: 'muted', text: '—' })])
       ];
       AXES.forEach(function (a) {
         var s = r.score[a.key];
@@ -1013,41 +1193,153 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       });
       body.appendChild(el('tr', { class: i === 0 && r.total !== null ? 'first' : '' }, cells));
     });
-    if (!ranking.rows.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(3 + AXES.length), text: 'Aucune donnée pour cette sélection' })]));
+    if (!ranking.rows.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(4 + AXES.length), text: 'Aucune donnée pour cette sélection' })]));
     table.appendChild(body);
 
     var notes = [];
-    if (ranking.rows.some(function (r) { return r.browser === 'lightpanda'; })) {
-      notes.push('Lightpanda n’a pas de moteur de rendu : il ne télécharge ni images ni CSS, ce qui l’avantage en vitesse et en mémoire sur les pages riches en médias.');
+    if (ranking.rows.some(function (r) { return familyOf(r.browser) === 'lightpanda'; })) {
+      notes.push('Lightpanda n’a pas de moteur de rendu : il ne télécharge ni images ni CSS. Pour le comparer à armes égales, regarder les variantes « lite » (campagne avec --modes=full,lite), qui bloquent aussi ces ressources.');
     }
     if (data.memoryMetrics.length > 1) notes.push('Mémoire : private working set (Windows) et USS (WSL), deux mesures de la mémoire propre au navigateur.');
-    notes.push('★ = meilleur sur l’axe (pas d’étoile en cas d’égalité). Un axe à poids 0 est grisé et ne compte pas dans le score global.');
+    notes.push('★ = meilleur sur l’axe (pas d’étoile en cas d’égalité). Un axe à poids 0 est grisé et ne compte pas dans le score global ; « n/d » = pas mesuré pour ce navigateur, l’axe est alors ignoré dans son score.');
     document.getElementById('ranking-notes').textContent = notes.join(' ');
   }
 
+  // ---------- throughput ----------
+  function lineStyle(browser) {
+    var v = variantOf(browser);
+    return v === 'stealth' ? [6, 4] : v === 'lite' ? [2, 3] : [];
+  }
+
+  function renderThroughput() {
+    var tests = (data.throughput || []).filter(function (t) { return state.browsers.has(t.browser) || data.browsers.indexOf(t.browser) < 0; });
+    var info = document.getElementById('tp-target');
+    info.textContent = tests.length ? tests.map(function (t) { return t.target; }).filter(function (v, i, a) { return a.indexOf(v) === i; }).join(', ') : 'aucun test';
+    var levels = [];
+    tests.forEach(function (t) { t.levels.forEach(function (l) { if (levels.indexOf(l.concurrency) < 0) levels.push(l.concurrency); }); });
+    levels.sort(function (a, b) { return a - b; });
+
+    function lineChart(id, field, unit) {
+      var options = baseOptions();
+      options.interaction = { mode: 'index', intersect: false };
+      options.plugins.tooltip.callbacks = { label: function (ctx) { return ctx.dataset.label + ' : ' + fmt(ctx.parsed.y, 0, unit); } };
+      options.scales.x.title = { display: true, text: 'pages en parallèle', color: css('--text-muted') };
+      options.scales.y.title = { display: true, text: unit.trim(), color: css('--text-muted') };
+      replaceChart(id, {
+        type: 'line',
+        data: {
+          labels: levels.map(String),
+          datasets: tests.map(function (t) {
+            return {
+              label: t.browser,
+              data: levels.map(function (c) { var l = t.levels.find(function (x) { return x.concurrency === c; }); return l ? l[field] : null; }),
+              borderColor: colorOf(t.browser), backgroundColor: colorOf(t.browser), borderDash: lineStyle(t.browser),
+              borderWidth: 2, pointRadius: 3, pointHoverRadius: 6, tension: 0, spanGaps: true
+            };
+          })
+        },
+        options: options
+      });
+    }
+    lineChart('tp-rate', 'pagesPerMinute', ' pages/min');
+    lineChart('tp-mem', 'memPeakMB', ' Mo');
+
+    var table = document.getElementById('tp-table');
+    table.replaceChildren();
+    table.appendChild(el('thead', {}, [el('tr', {}, ['Navigateur', 'Cible', 'Meilleur débit', 'Mémoire par page en plus', 'Échecs', 'Problème'].map(function (h) { return el('th', { text: h }); }))]));
+    var body = el('tbody');
+    tests.slice().sort(function (a, b) { return (b.bestPagesPerMinute || 0) - (a.bestPagesPerMinute || 0); }).forEach(function (t) {
+      var failures = t.levels.reduce(function (s, l) { return s + (l.pages - l.successes); }, 0);
+      var failedLevels = t.levels.filter(function (l) { return l.errors && l.errors.length; });
+      var problem = t.error || (failedLevels.length ? 'dès ' + failedLevels[0].concurrency + ' page(s) en parallèle : ' + failedLevels[0].errors[0] : '');
+      body.appendChild(el('tr', {}, [
+        el('td', {}, [browserLabel(t.browser, t.browserVersion)]),
+        el('td', { class: 'left', text: t.target }),
+        el('td', { text: fmt(t.bestPagesPerMinute, 0, ' pages/min') }),
+        el('td', { text: t.memPerPageMB === null ? '—' : fmt(t.memPerPageMB, 1, ' Mo'), title: 'pente de la mémoire au pic selon le nombre de pages' }),
+        el('td', { text: failures + ' / ' + t.levels.reduce(function (s, l) { return s + l.pages; }, 0) }),
+        el('td', { class: 'err', title: problem, text: problem })
+      ]));
+    });
+    if (!tests.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: '6', text: 'Aucun test de débit : lancer npm run throughput' })]));
+    table.appendChild(body);
+  }
+
+  // ---------- history ----------
+  var HISTORY_METRICS = [
+    { key: 'meanLoadTimeMs', label: 'Chargement moyen', unit: ' ms', scale: 1 },
+    { key: 'memAvgMB', label: 'Mémoire moyenne', unit: ' Mo', scale: 1 },
+    { key: 'cpuAvgPercent', label: 'CPU moyen', unit: ' %', scale: 1 },
+    { key: 'antiBotScore', label: 'Contrôles anti-bot réussis', unit: ' %', scale: 100 },
+    { key: 'antiBotPassRate', label: 'Pages anti-bot passées', unit: ' %', scale: 100 },
+    { key: 'fidelitySimilarity', label: 'Fidélité DOM', unit: ' %', scale: 100 },
+    { key: 'successRate', label: 'Runs réussis', unit: ' %', scale: 100 }
+  ];
+
+  (function initHistoryControls() {
+    var select = document.getElementById('history-metric');
+    HISTORY_METRICS.forEach(function (m) { select.appendChild(el('option', { value: m.key, text: m.label })); });
+    select.addEventListener('change', function () { renderHistory(); });
+  })();
+
+  function renderHistory() {
+    var history = data.history || [];
+    var metric = HISTORY_METRICS.find(function (m) { return m.key === document.getElementById('history-metric').value; }) || HISTORY_METRICS[0];
+    var browsers = [];
+    history.forEach(function (h) { h.browsers.forEach(function (b) { if (browsers.indexOf(b.browser) < 0 && (state.browsers.has(b.browser) || data.browsers.indexOf(b.browser) < 0)) browsers.push(b.browser); }); });
+    var labels = history.map(function (h) { return new Date(h.campaignAt).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }); });
+    document.getElementById('history-info').textContent = history.length < 2
+      ? history.length + ' campagne enregistrée : les courbes apparaîtront à partir de la deuxième.'
+      : history.length + ' campagnes';
+    var options = baseOptions();
+    options.interaction = { mode: 'index', intersect: false };
+    options.plugins.tooltip.callbacks = {
+      label: function (ctx) {
+        var entry = history[ctx.dataIndex].browsers.find(function (b) { return b.browser === ctx.dataset.label; });
+        return ctx.dataset.label + ' : ' + fmt(ctx.parsed.y, 0, metric.unit) + (entry && entry.version ? ' (' + entry.version + ')' : '');
+      }
+    };
+    options.scales.y.title = { display: true, text: metric.label + ' (' + metric.unit.trim() + ')', color: css('--text-muted') };
+    replaceChart('history-chart', {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: browsers.map(function (b) {
+          return {
+            label: b,
+            data: history.map(function (h) { var e = h.browsers.find(function (x) { return x.browser === b; }); return e && num(e[metric.key]) ? e[metric.key] * metric.scale : null; }),
+            borderColor: colorOf(b), backgroundColor: colorOf(b), borderDash: lineStyle(b),
+            borderWidth: 2, pointRadius: 3, pointHoverRadius: 6, tension: 0, spanGaps: true
+          };
+        })
+      },
+      options: options
+    });
+  }
+
   // ---------- views ----------
+  var VIEWS = ['ranking', 'details', 'throughput', 'history'];
   var activeView = 'ranking';
-  try { if (localStorage.getItem('bench-view') === 'details') activeView = 'details'; } catch (e) { /* ignore */ }
+  try { var savedView = localStorage.getItem('bench-view'); if (VIEWS.indexOf(savedView) >= 0) activeView = savedView; } catch (e) { /* ignore */ }
 
   function showView(view) {
     activeView = view;
-    ['ranking', 'details'].forEach(function (v) {
+    VIEWS.forEach(function (v) {
       document.getElementById('tab-' + v).setAttribute('aria-selected', v === view ? 'true' : 'false');
       document.getElementById('view-' + v).hidden = v !== view;
     });
     try { localStorage.setItem('bench-view', view); } catch (e) { /* ignore */ }
     update();
   }
-  ['ranking', 'details'].forEach(function (v) {
+  VIEWS.forEach(function (v) {
     document.getElementById('tab-' + v).addEventListener('click', function () { showView(v); });
   });
 
   function update() {
     // Charts are only built while visible: Chart.js cannot size a canvas inside a hidden panel.
-    if (activeView === 'ranking') {
-      renderRanking();
-      return;
-    }
+    if (activeView === 'ranking') return renderRanking();
+    if (activeView === 'throughput') return renderThroughput();
+    if (activeView === 'history') return renderHistory();
     renderSummary();
     renderAntiBot();
     renderLoadChart();

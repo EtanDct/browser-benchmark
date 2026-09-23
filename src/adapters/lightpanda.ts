@@ -5,8 +5,17 @@ import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppete
 import { findOnPath, getFreePort, waitForPort } from '../util/proc.js';
 import { withTimeout } from '../util/time.js';
 import { findWslBinary, wslAvailable, wslDistroArgs, wslHostIp, wslKill, wslShell } from '../util/wsl.js';
-import type { AdapterDefinition, Availability, BrowserAdapter, LaunchResult, NavigateOptions, NavigationResult } from './base.js';
-import { navigatePuppeteerPage } from './puppeteer.js';
+import type {
+  AdapterDefinition,
+  Availability,
+  BrowserAdapter,
+  LaunchOptions,
+  LaunchResult,
+  NavigateOptions,
+  NavigationResult,
+  PageHandle,
+} from './base.js';
+import { navigatePuppeteerPage, puppeteerPageHandle } from './puppeteer.js';
 
 /**
  * Lightpanda exposes a CDP server (`lightpanda serve`), driven here through puppeteer.connect().
@@ -70,8 +79,9 @@ class LightpandaAdapter implements BrowserAdapter {
   private context?: BrowserContext;
   private page?: Page;
   private mode?: Mode;
+  private endpoint?: string;
 
-  async launch(): Promise<LaunchResult> {
+  async launch(options: LaunchOptions = {}): Promise<LaunchResult> {
     const mode = await resolveMode();
     if (mode.kind === 'missing') throw new Error(`Lightpanda unavailable: ${mode.reason}`);
     this.mode = mode;
@@ -83,13 +93,14 @@ class LightpandaAdapter implements BrowserAdapter {
       result = { pid: null };
     } else {
       const port = await getFreePort();
-      const serve = `serve --host 127.0.0.1 --port ${port}`;
+      const serve = ['serve', '--host', '127.0.0.1', '--port', String(port)];
+      if (options.proxyUrl) serve.push('--http-proxy', this.reachable(options.proxyUrl));
       const server = mode.kind === 'wsl'
-        ? spawn('wsl.exe', [...wslDistroArgs(), '-e', 'sh', '-c', `echo PID:$$; LIGHTPANDA_DISABLE_TELEMETRY=true exec ${mode.binary} ${serve}`], {
+        ? spawn('wsl.exe', [...wslDistroArgs(), '-e', 'sh', '-c', `echo PID:$$; LIGHTPANDA_DISABLE_TELEMETRY=true exec ${mode.binary} ${serve.join(' ')}`], {
             stdio: ['ignore', 'pipe', 'ignore'],
             windowsHide: true,
           })
-        : spawn(mode.binary, serve.split(' '), { env: { ...process.env, LIGHTPANDA_DISABLE_TELEMETRY: 'true' }, stdio: 'ignore' });
+        : spawn(mode.binary, serve, { env: { ...process.env, LIGHTPANDA_DISABLE_TELEMETRY: 'true' }, stdio: 'ignore' });
       this.server = server;
       if (mode.kind === 'wsl') this.wslPid = await readWslPid(server);
       await waitForPort(port, 30_000, () => server.exitCode === null);
@@ -97,6 +108,7 @@ class LightpandaAdapter implements BrowserAdapter {
       result = mode.kind === 'wsl' ? { pid: this.wslPid!, location: 'wsl' } : { pid: server.pid ?? null };
     }
 
+    this.endpoint = endpoint;
     this.browser = await puppeteer.connect({ browserWSEndpoint: endpoint });
     this.context = await this.browser.createBrowserContext();
     this.page = await this.context.newPage();
@@ -108,7 +120,23 @@ class LightpandaAdapter implements BrowserAdapter {
     return navigatePuppeteerPage(this.page, this.reachable(url), options);
   }
 
-  /** From WSL, this machine's loopback is the VM's own: local fixtures are reached via the host address. */
+  /** Lightpanda serves one page per browser context, so each extra page gets its own CDP connection. */
+  async openPages(count: number): Promise<PageHandle[]> {
+    const endpoint = this.endpoint;
+    if (!endpoint) throw new Error('launch() must be called before openPages()');
+    return Promise.all(Array.from({ length: count }, async () => {
+      const browser = await puppeteer.connect({ browserWSEndpoint: endpoint });
+      const context = await browser.createBrowserContext();
+      const page = await context.newPage();
+      const handle = puppeteerPageHandle(page, async () => {
+        await context.close().catch(() => undefined);
+        await browser.disconnect().catch(() => undefined);
+      });
+      return { navigate: (url: string, options: NavigateOptions) => handle.navigate(this.reachable(url), options), close: handle.close };
+    }));
+  }
+
+  /** From WSL, this machine's loopback is the VM's own: local fixtures and the proxy are reached via the host address. */
   private reachable(url: string): string {
     if (this.mode?.kind !== 'wsl') return url;
     const parsed = new URL(url);
@@ -159,4 +187,6 @@ export const lightpandaDefinition: AdapterDefinition = {
         return { available: true };
     }
   },
+  // No rendering engine: it never fetches images, stylesheets or fonts, so "lite" would change nothing.
+  supportsLite: false,
 };

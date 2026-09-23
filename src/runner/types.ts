@@ -1,7 +1,11 @@
 import type { NavigationResult } from '../adapters/base.js';
 import type { MemoryMetric, ResourceSample, ResourceSummary } from '../monitor/resource-sampler.js';
+import type { ByteCounts } from '../network/byte-proxy.js';
 
 export const RUN_SCHEMA_VERSION = 1;
+
+/** full: the page as a user sees it. lite: images, stylesheets, fonts and media blocked, like a DOM scraper. */
+export type RunMode = 'full' | 'lite';
 
 export interface EnvironmentInfo {
   platform: string;
@@ -15,7 +19,12 @@ export interface EnvironmentInfo {
 
 export interface RunRecord {
   schemaVersion: number;
+  /** Row key in reports: the adapter name, suffixed with "+lite" in lite mode. */
   browser: string;
+  adapter?: string;
+  mode?: RunMode;
+  /** Anti-detection variant (stealth plugin, patched driver, anti-detect build). */
+  stealth?: boolean;
   browserVersion?: string;
   target: string;
   targetGroup: string;
@@ -30,6 +39,10 @@ export interface RunRecord {
     summary: ResourceSummary;
     samples: ResourceSample[];
   } | null;
+  /** Bytes moved through the counting proxy during navigation (remote targets only). */
+  network?: ByteCounts | null;
+  /** File name in results/screens, for visual comparison. */
+  screenshot?: string;
   /** Set when the run failed outside navigation (launch error, hard timeout...). */
   error?: string;
   timedOut?: boolean;

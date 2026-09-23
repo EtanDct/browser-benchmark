@@ -1,6 +1,9 @@
 import type { AdapterDefinition } from './base.js';
+import { camoufoxDefinition } from './camoufox.js';
 import { lightpandaDefinition } from './lightpanda.js';
+import { patchrightDefinition } from './patchright.js';
 import { playwrightDefinition } from './playwright.js';
+import { puppeteerStealthDefinition } from './puppeteer-stealth.js';
 import { puppeteerDefinition } from './puppeteer.js';
 import { seleniumChromeDefinition } from './selenium.js';
 
@@ -12,12 +15,17 @@ export const ADAPTERS: AdapterDefinition[] = [
   playwrightDefinition('webkit'),
   lightpandaDefinition,
   seleniumChromeDefinition,
+  puppeteerStealthDefinition,
+  patchrightDefinition,
+  camoufoxDefinition,
 ];
 
 /** Shorthands accepted by --browsers, besides adapter names and "all". */
 const ALIASES: Record<string, string[]> = {
   playwright: ['playwright-chromium', 'playwright-firefox', 'playwright-webkit'],
   selenium: ['selenium-chrome'],
+  stealth: ADAPTERS.filter((a) => a.stealth).map((a) => a.name),
+  vanilla: ADAPTERS.filter((a) => !a.stealth).map((a) => a.name),
 };
 
 export function resolveAdapters(selection: string[]): AdapterDefinition[] {

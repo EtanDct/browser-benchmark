@@ -1,0 +1,100 @@
+name: Campaign
+
+# Weekly benchmark campaign. Results: the "campaign-results" artifact (dashboard + raw data), and one
+# summary per campaign appended to the bench-history branch, which feeds the dashboard's History tab.
+on:
+  schedule:
+    - cron: '0 3 * * 1' # Mondays, 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      browsers:
+        description: Browsers (names, aliases or "all")
+        default: all
+      targets:
+        description: Targets (names, groups or "all")
+        default: all
+      runs:
+        description: Measured runs per (browser, target)
+        default: '5'
+      modes:
+        description: full and/or lite
+        default: full
+
+permissions:
+  contents: write
+
+concurrency:
+  group: campaign
+  cancel-in-progress: false
+
+jobs:
+  campaign:
+    # GitHub's shared runners are noisy neighbours: for numbers comparable week after week, register a
+    # dedicated self-hosted runner and set the BENCH_RUNNER repository variable to its label.
+    runs-on: ${{ vars.BENCH_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 350
+    env:
+      BROWSERS: ${{ inputs.browsers || 'all' }}
+      TARGETS: ${{ inputs.targets || 'all' }}
+      RUNS: ${{ inputs.runs || '5' }}
+      MODES: ${{ inputs.modes || 'full' }}
+      CAMOUFOX_INSTALL_DIR: ${{ github.workspace }}/../camoufox
+      HISTORY_DIR: ${{ github.workspace }}/../bench-history
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium firefox webkit
+      # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor, which Chrome's sandbox needs.
+      - name: Allow Chrome's sandbox on Ubuntu 24.04
+        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+      - name: Install Lightpanda (pinned release)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/lightpanda" https://github.com/lightpanda-io/browser/releases/download/0.4.1/lightpanda-x86_64-linux
+          chmod a+x "$RUNNER_TEMP/lightpanda"
+          echo "LIGHTPANDA_BIN=$RUNNER_TEMP/lightpanda" >> "$GITHUB_ENV"
+      - name: Cache Camoufox
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CAMOUFOX_INSTALL_DIR }}
+          key: camoufox-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Camoufox
+        run: test -e "$CAMOUFOX_INSTALL_DIR/camoufox" || npx camoufox-js fetch
+
+      - name: Restore campaign history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git ls-remote --exit-code --heads origin bench-history > /dev/null; then
+            git clone --depth 1 --branch bench-history "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$HISTORY_DIR"
+          else
+            git init -b bench-history "$HISTORY_DIR"
+            git -C "$HISTORY_DIR" remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          fi
+          mkdir -p results/history "$HISTORY_DIR/history"
+          cp "$HISTORY_DIR"/history/*.json results/history/ 2>/dev/null || true
+
+      - name: Benchmark campaign
+        run: npm run bench -- --browsers="$BROWSERS" --targets="$TARGETS" --runs="$RUNS" --modes="$MODES" --pause=1000
+      - name: Throughput test
+        run: npm run throughput -- --browsers="$BROWSERS" --concurrency=1,2,4,8 --pages=24
+
+      - name: Save campaign history
+        run: |
+          cp results/history/*.json "$HISTORY_DIR/history/"
+          cd "$HISTORY_DIR"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add history
+          git commit -m "Campaign $(date -u +%Y-%m-%dT%H:%MZ) (runs=$RUNS, modes=$MODES)" || exit 0
+          git push origin bench-history
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: campaign-results
+          path: |
+            dashboard/index.html
+            results/

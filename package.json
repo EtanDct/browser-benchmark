@@ -12,20 +12,28 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "install-browsers": "tsx src/cli.ts install-browsers",
-    "dashboard:artifact": "tsx dashboard/generate-dashboard.ts --artifact"
+    "dashboard:artifact": "tsx dashboard/generate-dashboard.ts --artifact",
+    "throughput": "tsx src/cli.ts throughput"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
+    "camoufox-js": "^0.12.0",
+    "patchright": "^1.63.0",
     "pidusage": "^3.0.2",
+    "pixelmatch": "^7.2.0",
     "playwright": "^1.63.0",
+    "pngjs": "^7.0.0",
     "puppeteer": "^25.11.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "selenium-webdriver": "^4.49.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.4",
     "@types/pidusage": "^2.0.5",
+    "@types/pngjs": "^6.0.5",
     "@types/selenium-webdriver": "^4.35.7",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"

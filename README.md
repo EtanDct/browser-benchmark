@@ -1,10 +1,10 @@
 # Benchmark de navigateurs headless
 
-Compare des navigateurs/frameworks headless sur trois axes :
+Compare des navigateurs et frameworks headless, dans leur configuration par défaut et en variantes anti-détection :
 
-1. **Contournement anti-bot** : fingerprinting (bot.sannysoft.com), challenges Cloudflare
-2. **Performance brute** : temps de chargement, RAM/CPU de tout l'arbre de process dans le temps
-3. **Fidélité de rendu** : structure du DOM final comparée entre navigateurs
+1. **Contournement anti-bot** : fingerprinting (sannysoft, CreepJS, deviceandbrowserinfo, BrowserScan), vrai challenge Cloudflare
+2. **Performance** : temps de chargement et de lancement, RAM/CPU de tout l'arbre de process, octets réseau, **débit en parallèle**
+3. **Fidélité** : similarité du DOM final entre navigateurs, **comparaison pixel à pixel** des captures
 
 Chaque navigateur est un **adapter** derrière une interface commune : en ajouter un ne touche pas au moteur.
 
@@ -13,53 +13,72 @@ Chaque navigateur est un **adapter** derrière une interface commune : en ajoute
 ```bash
 npm install                                   # installe aussi Chrome for Testing (Puppeteer)
 npm run install-browsers                      # Chromium, Firefox et WebKit de Playwright
+npx camoufox-js fetch                         # Camoufox (~500 Mo), optionnel
 npm run list                                  # navigateurs disponibles + cibles
-npm run bench -- --browsers=all --targets=local --runs=3
+npm run bench -- --targets=local --runs=3
 ```
 
-À la fin d'une campagne, les résultats sont agrégés et le dashboard est régénéré : ouvrir `dashboard/index.html` dans un navigateur (aucun serveur nécessaire).
+À la fin d'une campagne, les résultats sont agrégés, un résumé est ajouté à l'historique et le dashboard est régénéré : ouvrir `dashboard/index.html` (aucun serveur nécessaire).
+
+**Configuration locale** : les variables d'environnement peuvent être placées dans un fichier `.env` à la racine (ignoré par git, voir [`.env.example`](.env.example)), chargé par chaque commande `npm run` : `PLAYWRIGHT_BROWSERS_PATH`, `CAMOUFOX_INSTALL_DIR`, `LIGHTPANDA_*`.
 
 ## Commandes
 
 ```bash
 npm run bench -- --browsers=all --targets=all --runs=10
-npm run bench -- --browsers=puppeteer,lightpanda --targets=antibot --runs=5
-npm run aggregate     # reconstruit results/aggregated.json depuis results/raw
-npm run dashboard     # régénère dashboard/index.html depuis results/aggregated.json
-npm run list          # disponibilité des navigateurs et liste des cibles
-npm run install-browsers  # installe les navigateurs Playwright (respecte PLAYWRIGHT_BROWSERS_PATH)
-npm test              # tests unitaires
-npm run typecheck
+npm run bench -- --browsers=stealth,puppeteer --targets=antibot
+npm run bench -- --browsers=vanilla --targets=local,performance --modes=full,lite
+npm run throughput -- --target=local-heavy-js --concurrency=1,2,4,8
+npm run aggregate           # reconstruit results/aggregated.json (runs, captures, débit)
+npm run dashboard           # régénère dashboard/index.html
+npm run dashboard:artifact  # même page, sans enveloppe HTML, pour une publication en Artifact
+npm run list                # disponibilité des navigateurs et liste des cibles
+npm run install-browsers    # installe les navigateurs Playwright (respecte PLAYWRIGHT_BROWSERS_PATH)
+npm test && npm run typecheck
 ```
+
+### Options de `bench`
 
 | Option | Défaut | Rôle |
 |---|---|---|
-| `--browsers` | `all` | noms d'adapters, alias (`playwright`, `selenium`) ou `all` |
+| `--browsers` | `all` | noms d'adapters, alias (`playwright`, `selenium`, `stealth`, `vanilla`) ou `all` |
 | `--targets` | `all` | noms de cibles, groupes (`antibot`, `performance`, `local`) ou `all` |
-| `--runs` | `10` | itérations par couple (navigateur, cible) |
+| `--runs` | `10` | runs mesurés par couple (navigateur, cible) |
+| `--warmup` | `1` | runs de chauffe par couple, non enregistrés (cache disque, DNS, VM WSL) |
+| `--order` | `interleaved` | `interleaved` : chaque tour fait passer chaque navigateur sur chaque cible, en changeant de navigateur de départ d'un tour à l'autre ; `sequential` : un navigateur après l'autre |
+| `--modes` | `full` | `full` (page normale) et/ou `lite` (images, CSS, polices et médias bloqués) |
+| `--no-bytes` | — | ne pas faire passer le trafic par le proxy de comptage |
+| `--no-screenshots` | — | pas de captures pour la comparaison visuelle |
 | `--pause` | `2000` | pause entre deux runs (ms) |
 | `--interval` | `200` | intervalle d'échantillonnage RAM/CPU (ms) |
 | `--timeout` | par cible | remplace le timeout de navigation de toutes les cibles |
-| `--config` | `config/targets.json` | fichier de cibles |
-| `--results` | `results` | dossier des résultats |
-| `--clean` | non | supprime les résultats bruts précédents avant la campagne |
+| `--config` / `--results` | `config/targets.json` / `results` | fichier de cibles / dossier des résultats |
+| `--clean` | — | supprime les résultats bruts et captures précédents |
 
-**Configuration locale** : les variables d'environnement peuvent aussi être placées dans un fichier `.env` à la racine (ignoré par git, voir [`.env.example`](.env.example)). Il est chargé par chaque commande `npm run`. Variables utiles : `PLAYWRIGHT_BROWSERS_PATH` et `LIGHTPANDA_*`.
+### Options de `throughput`
 
-Sans `--clean`, les résultats bruts s'accumulent : on peut lancer Lightpanda un jour et Puppeteer le lendemain, l'agrégation couvre tout. Un run relancé écrase le fichier du même `{browser}_{target}_{run}`.
+| Option | Défaut | Rôle |
+|---|---|---|
+| `--browsers` | `all` | Selenium est ignoré (une seule page par session WebDriver) |
+| `--target` | `local-heavy-js` | page chargée en boucle |
+| `--concurrency` | `1,2,4,8` | nombre de pages en parallèle, une mesure par valeur |
+| `--pages` | `24` | chargements par niveau de parallélisme |
 
 ## Navigateurs
 
-| Adapter | Pilotage | Process surveillé |
+| Adapter | Pilotage | Type |
 |---|---|---|
-| `puppeteer` | Chrome for Testing via CDP | navigateur + renderers/GPU/utilitaires |
-| `playwright-chromium` | Playwright (`chromium-headless-shell`) | idem |
-| `playwright-firefox` | Playwright | Firefox + content processes |
-| `playwright-webkit` | Playwright | WebKit + WebContent/Network |
-| `lightpanda` | serveur CDP `lightpanda serve` + `puppeteer.connect()` | process Lightpanda (dans WSL sous Windows) |
-| `selenium-chrome` | Selenium WebDriver + chromedriver | chromedriver + Chrome |
+| `puppeteer` | Chrome for Testing via CDP | par défaut |
+| `playwright-chromium` | Playwright (`chromium-headless-shell`) | par défaut |
+| `playwright-firefox` | Playwright | par défaut |
+| `playwright-webkit` | Playwright | par défaut |
+| `lightpanda` | serveur CDP `lightpanda serve` + `puppeteer.connect()` | par défaut, sans moteur de rendu |
+| `selenium-chrome` | Selenium WebDriver + chromedriver | par défaut |
+| `puppeteer-stealth` | Puppeteer + `puppeteer-extra-plugin-stealth` | **furtif** : masque les fuites headless classiques |
+| `patchright` | fork de Playwright sans fuites CDP, sur le Google Chrome installé | **furtif** |
+| `camoufox` | Firefox anti-détection (patché en C++), via `camoufox-js` | **furtif** |
 
-Chaque run lance un navigateur neuf (profil vierge), sans plugin furtif : on mesure le comportement **par défaut** de chaque outil.
+Chaque run lance un navigateur neuf (profil vierge). En mode `lite`, chaque navigateur qui a un moteur de rendu bloque les images, feuilles de style, polices et médias : c'est la comparaison à armes égales avec Lightpanda, qui ne les charge jamais. Les résultats portent alors le suffixe `+lite`.
 
 ### Lightpanda
 
@@ -71,33 +90,23 @@ Lightpanda expose un serveur compatible CDP ; il est piloté par Puppeteer. Il n
 | Windows | **build Linux lancé dans WSL2** : CDP joint via la redirection localhost de WSL | oui : échantillonné **dans** WSL (USS) |
 | partout | `LIGHTPANDA_WS_ENDPOINT=ws://…` : instance externe (Docker…) | non |
 
-**Installation sous Windows (WSL2)** : dans la distribution WSL par défaut, placer le binaire dans `~/.local/bin/lightpanda` :
+**Installation sous Windows (WSL2)**, dans la distribution WSL par défaut :
 
 ```bash
 wsl -e sh -c "mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/lightpanda https://github.com/lightpanda-io/browser/releases/download/0.4.1/lightpanda-x86_64-linux && chmod a+x ~/.local/bin/lightpanda"
 ```
 
-Variables optionnelles : `LIGHTPANDA_WSL_BIN` (autre chemin dans WSL) et `LIGHTPANDA_WSL_DISTRO` (autre distribution). `python3` doit être présent dans WSL : l'échantillonneur de ressources l'utilise.
+Variables optionnelles : `LIGHTPANDA_WSL_BIN` et `LIGHTPANDA_WSL_DISTRO`. `python3` doit être présent dans WSL (échantillonneur de ressources). En mode WSL, les fixtures `local://` et le proxy de comptage sont aussi servis sur l'adresse de Windows vue depuis WSL, et l'échantillonneur WSL garde la VM allumée pendant toute la campagne : son démarrage n'est jamais compté dans un temps de lancement. La version enregistrée est la vraie (`Lightpanda 0.4.1`), pas la version Chrome annoncée via CDP.
 
-En mode WSL, Lightpanda tourne dans la VM WSL2 : son trafic passe par le NAT de WSL, et les fixtures `local://` sont servies aussi sur l'adresse de Windows vue depuis WSL. Le runner démarre l'échantillonneur WSL dès le début de la campagne, ce qui garde la VM allumée : son démarrage n'est jamais compté dans un temps de lancement. La version enregistrée est la vraie (`Lightpanda 0.4.1`), et non la version Chrome que Lightpanda annonce via CDP.
+### Variantes furtives
 
-Lightpanda n'a **pas de moteur de rendu** : il ne télécharge ni images ni CSS, ce qui explique en partie ses temps de chargement.
-
-La télémétrie de Lightpanda est désactivée (`LIGHTPANDA_DISABLE_TELEMETRY=true`) quand le benchmark le lance lui-même.
+- **puppeteer-stealth** utilise le même Chrome for Testing que `puppeteer`.
+- **patchright** pilote le Google Chrome installé (`channel: 'chrome'`) : rien à télécharger.
+- **camoufox** : `npx camoufox-js fetch` télécharge le navigateur (~500 Mo) et une base GeoIP (66 Mo). `camoufox-js` embarque sa propre version de Playwright, alignée sur Camoufox, et l'adapter s'y connecte avec cette même version. Sous Windows, le placer hors d'`AppData` (voir Dépannage) : `CAMOUFOX_INSTALL_DIR=C:/Users/<vous>/.cache/camoufox` dans `.env`.
 
 ## Cibles
 
 Définies dans [`config/targets.json`](config/targets.json) :
-
-```json
-{
-  "name": "sannysoft",
-  "group": "antibot",
-  "url": "https://bot.sannysoft.com",
-  "settleMs": 3000,
-  "antiBot": { "evaluator": "sannysoft" }
-}
-```
 
 | Champ | Rôle |
 |---|---|
@@ -105,111 +114,111 @@ Définies dans [`config/targets.json`](config/targets.json) :
 | `url` | `http(s)://…` ou `local://<page>?params` (fixtures servies localement) |
 | `timeoutMs` | timeout de navigation jusqu'à `load` (défaut 30 s) |
 | `settleMs` | attente après `load` avant capture du DOM (défaut 1 s) |
-| `challengeWaitMs` | temps laissé à un challenge anti-bot pour se résoudre, en sondant toutes les 500 ms (défaut 15 s) |
+| `challengeWaitMs` | temps laissé à un challenge anti-bot pour se résoudre, sondé toutes les 500 ms (défaut 15 s ; un verdict qui ne s'affiche jamais n'est attendu que 8 s) |
+| `visual` | capture d'écran pour la comparaison visuelle (défaut : pages `local://` seulement, les sites réels changeant d'un chargement à l'autre) |
 | `antiBot.evaluator` | `cloudflare`, `sannysoft`, `creepjs`, `deviceandbrowserinfo` ou `generic` |
 | `antiBot.successText` / `failureTexts` | textes attendus/interdits dans le texte visible de la page |
 | `antiBot.passedPattern` / `detectedPattern` | (`generic`) regex sur le texte visible pour lire un verdict |
 
-Les verdicts sont lus dans le **texte visible** (sans `<script>`/`<style>`) : les pages de détection embarquent souvent les deux messages (« bot » et « humain ») dans leur JavaScript. Tant que le verdict n'est pas affiché (challenge en cours ou calcul asynchrone), la page est relue toutes les 500 ms, dans la limite de `challengeWaitMs`.
+Les verdicts anti-bot sont lus dans le **texte visible** : les pages de détection embarquent souvent les deux messages dans leur JavaScript.
 
 ### Cibles anti-bot
 
-Toutes sont des pages **conçues pour tester la détection**. Elles couvrent les trois familles de protection :
+Toutes sont des pages **conçues pour tester la détection** :
 
 | Cible | Famille | Ce qui est testé | Verdict lu |
 |---|---|---|---|
-| `sannysoft` | fingerprinting classique | webdriver, plugins, WebGL, permissions… (tests Intoli/fpscanner) | nombre de contrôles `failed` |
-| `creepjs` | fingerprinting avancé | signaux headless + détection des API falsifiées (plugins stealth) | scores `headless` / `stealth` (passage = 0 % et 0 %) |
-| `deviceandbrowserinfo` | signaux de niveau commercial | pilotage CDP, webdriver, incohérences client hints/workers (par un chercheur de DataDome) | JSON `isBot` + signaux déclenchés |
+| `sannysoft` | fingerprinting classique | webdriver, plugins, WebGL, permissions… | nombre de contrôles `failed` |
+| `creepjs` | fingerprinting avancé | signaux headless + API falsifiées (plugins stealth) | scores `headless` / `stealth` |
+| `deviceandbrowserinfo` | signaux de niveau commercial | pilotage CDP, webdriver, incohérences client hints/workers | JSON `isBot` + signaux déclenchés |
 | `browserscan` | scanner d'anti-detect | webdriver, user-agent, CDP, navigator | `Test Results: Robot / Normal` |
-| `cloudflare-challenge` | WAF commercial | vrai challenge géré Cloudflare (bac à sable scrapingcourse.com) | page réelle servie (« You bypassed ») |
-| `cloudflare-antibot` | WAF commercial | configuration Cloudflare plus stricte, même bac à sable | idem |
+| `cloudflare-challenge` | WAF commercial | vrai challenge géré Cloudflare (bac à sable scrapingcourse.com) | page réelle servie |
+| `cloudflare-antibot` | WAF commercial | configuration Cloudflare plus stricte | idem |
 
-`unknown` signifie que la page n'a jamais affiché de verdict : son script de détection n'a pas abouti dans ce navigateur (API absente dans Lightpanda, par exemple). Ce cas compte comme un **échec de passage**, car un vrai site protégé ne laisse pas passer un client qui ne renvoie pas son empreinte. Quand le passage échoue, le début du texte visible de la page est conservé (`antiBot.excerpt`) dans le résultat brut.
-
-Pour tester des sites de production protégés (DataDome, Akamai, PerimeterX…) que vous êtes autorisé à tester, ajoutez-les dans `config/targets.local.json` : copier [`config/targets.local.example.json`](config/targets.local.example.json) (fichier ignoré par git). Ses cibles s'ajoutent à la config principale et remplacent celles qui portent le même nom.
+Chaque verdict porte aussi un **score gradué**, la part des contrôles réussis, qui départage les navigateurs même quand aucun ne passe. `unknown` signifie que le script de détection n'a pas abouti dans ce navigateur : c'est compté comme un échec, car un vrai site protégé ne laisse pas passer un client qui ne renvoie pas son empreinte. Pour des sites de production protégés (DataDome, Akamai…) que vous êtes autorisé à tester : `config/targets.local.json`, sur le modèle de [`config/targets.local.example.json`](config/targets.local.example.json).
 
 ### Fixtures locales
-
-Les cibles `local://` sont servies par un serveur intégré sur `127.0.0.1`, démarré automatiquement. Le contenu est identique d'un run et d'un navigateur à l'autre. On isole ainsi une variable à la fois, et la comparaison de DOM reste significative.
 
 | Page | Paramètres | Contenu |
 |---|---|---|
 | `local://static` | — | texte + tableau (baseline) |
 | `local://heavy-js` | `kb` | JS généré de ~`kb` Ko qui construit le DOM |
-| `local://images` | `count`, `size` | `count` PNG `size`×`size` générés (bruit, non triviaux à décoder) |
+| `local://images` | `count`, `size` | `count` PNG `size`×`size` générés |
 | `local://spa` | `items` | liste rendue côté client depuis une API JSON |
+
+Contenu identique d'un run et d'un navigateur à l'autre : on isole une variable à la fois, et la comparaison DOM ou visuelle est significative.
 
 ## Métriques
 
-Pour chaque run (1 navigateur × 1 cible × 1 itération), un fichier `results/raw/{browser}_{target}_{run}.json` contient :
+Pour chaque run, `results/raw/{navigateur}_{cible}_{run}.json` contient :
 
-- **Temps de chargement** : de `goto()` à l'événement `load`, mesuré par l'orchestrateur. La valeur Navigation Timing (`loadEventEnd`) est aussi conservée quand le navigateur l'expose.
-- **Temps de lancement** : jusqu'à ce que le navigateur soit prêt à naviguer.
-- **RAM / CPU** : échantillonnage de **tout l'arbre de process** du navigateur toutes les 200 ms, du navigateur prêt jusqu'à la capture du DOM → min / max / moyenne + série temporelle.
-  - Windows : *private working set* (mémoire propre de chaque process, sans double-compter les DLL partagées entre renderers Chromium), lu via `NtQuerySystemInformation` depuis un process PowerShell persistant. `wmic` a disparu de Windows 11, et `pidusage` ne fonctionne plus sous Windows.
-  - Navigateurs lancés dans WSL (Lightpanda sous Windows) : *USS* (`Private_Clean + Private_Dirty` de `/proc/<pid>/smaps_rollup`), l'équivalent Linux du *private working set*, lu par un petit script Python exécuté dans WSL.
-  - Linux/macOS natif : RSS via `pidusage`, arbre via `ps`. Le RSS additionne les pages partagées : ne pas comparer des chiffres absolus entre OS.
-  - CPU en % **d'un cœur**, additionné sur l'arbre (peut dépasser 100 %). Le premier échantillon sert de référence (`null`).
-  - La fenêtre commence juste après le lancement : elle inclut donc le travail de démarrage que certains navigateurs font encore en tâche de fond.
-- **Anti-bot** : verdict `passed` / `challenge` / `blocked` / `detected` / `unknown`, avec le détail (ex. `27 passed, 0 warn, 4 failed` sur sannysoft).
-- **Fidélité** : hash SHA-256 (tronqué) de la séquence des balises du DOM final, plus le nombre d'éléments et la longueur du texte.
-- **Erreurs / timeouts** : capturés sans interrompre la campagne. Un navigateur qui ne se ferme pas à temps voit tout son arbre de process tué (`forcedKill`), pour ne pas fausser le run suivant.
+- **Temps de chargement** (de `goto()` à `load`) et **de lancement**.
+- **RAM / CPU** de **tout l'arbre de process**, échantillonnés toutes les 200 ms : *private working set* sous Windows (`NtQuerySystemInformation`), *USS* dans WSL, RSS sous Linux/macOS natif (qui compte en double les pages partagées : ne pas comparer des chiffres absolus entre OS). CPU en % d'un cœur, additionné sur l'arbre.
+- **Octets réseau** : tout le trafic passe par un petit proxy local (HTTP + tunnels `CONNECT`) qui compte les octets reçus et envoyés pendant la navigation, TLS compris. C'est ce que facturerait un proxy payant. Le compte est fait de la même façon pour tous les navigateurs, Lightpanda et Selenium compris. Il n'est mesuré que sur les pages distantes : la plupart des navigateurs contournent le proxy pour `127.0.0.1`.
+- **Anti-bot** : verdict, score gradué, extrait de la page en cas d'échec.
+- **DOM** : hash de la séquence des balises et **nombre d'éléments par balise**.
+- **Capture d'écran** (premier run, pages `visual`, mode full), en 1280×800, dans `results/screens/`.
 
-`results/aggregated.json` calcule, par (navigateur × cible), moyenne, médiane, écart-type, min, max et p95 ; taux de succès et taux de passage anti-bot (un chargement raté compte comme un échec) ; et **fidélité** = part des runs dont le hash DOM égale le hash majoritaire tous navigateurs confondus pour cette cible. Plusieurs variantes pour un même navigateur signalent une page non déterministe (pub, A/B test…).
+### Agrégation (`results/aggregated.json`)
+
+Par (navigateur × cible) : moyenne, médiane, écart-type, p95 et **intervalle de confiance à 95 %** de la moyenne (Student). Également :
+- taux de passage et score anti-bot ;
+- **fidélité DOM graduée** : similarité (Jaccard pondéré des nombres d'éléments par balise) avec le DOM de consensus, qui est la médiane de chaque balise sur tous les navigateurs. Un seul élément différent ne met plus le score à 0 ;
+- **rendu visuel** : part des pixels identiques à la capture du navigateur de référence (Playwright Chromium à défaut d'un autre), via pixelmatch, les tailles différentes étant recadrées ;
+- les valeurs **run par run**, qui servent au bootstrap du classement.
 
 ## Dashboard
 
-`dashboard/index.html` est un fichier unique, avec les données embarquées et Chart.js chargé depuis un CDN. Il a deux onglets, qui partagent les mêmes filtres.
+Un fichier unique, les données embarquées. Chart.js est chargé depuis un CDN. Quatre onglets partagent les mêmes filtres :
 
-**Classement** : croise tous les navigateurs pour désigner le meilleur.
+- **Classement** : 9 axes notés sur 100 (anti-bot, vitesse, démarrage, mémoire, CPU, réseau, fidélité DOM, rendu visuel, fiabilité), un score global pondéré, des préréglages (*Équilibré*, *Scraping discret*, *Performance / volume*, *Rendu fidèle*).
+  - La **robustesse du classement** est testée par **bootstrap** : le classement est refait 200 fois en tirant au sort, avec remise, les runs de chaque case. On obtient ainsi, pour chaque navigateur, la part des tirages où il finit 1er et la plage de rangs où il tombe dans 90 % des cas. Une avance « fragile » signale un écart que les runs ne permettent pas d'affirmer.
+- **Détails** : synthèse par navigateur, matrice anti-bot, graphiques de chargement et de mémoire, RAM/CPU dans le temps pour un run, tableau navigateur × cible paginé et triable (IC 95 %, réseau, similarité DOM, rendu visuel).
+- **Débit** : pages par minute et mémoire au pic selon le nombre de pages en parallèle, mémoire par page supplémentaire (pente).
+- **Historique** : une courbe par navigateur, campagne après campagne, avec la version au survol.
 
-- 7 axes notés sur 100 :
+La couleur identifie la **famille de moteur** (par exemple Chromium pour `playwright-chromium` et `patchright`) et reste la même quels que soient les filtres. Le **motif** identifie la variante : hachuré pour furtif, estompé pour lite ; en pointillés sur les courbes.
 
-  | Axe | Mesure | Calcul |
-  |---|---|---|
-  | Anti-bot | score de discrétion gradué | absolu : part des contrôles de détection passés (sannysoft), 100 − score headless/stealth (CreepJS), part des signaux non déclenchés (deviceandbrowserinfo), 1/0 ailleurs |
-  | Vitesse | temps de chargement médian | relatif, cible par cible : meilleur / valeur (2× plus lent = 50) |
-  | Démarrage | temps de lancement | relatif |
-  | Mémoire | mémoire moyenne | relatif |
-  | CPU | CPU moyen | relatif, +5 points de chaque côté pour ne pas écraser le classement sur les pages quasi inactives |
-  | Fidélité | DOM identique au consensus | absolu |
-  | Fiabilité | runs réussis | absolu |
+## Débit en parallèle
 
-- score global = moyenne pondérée des axes. Les pondérations (0 à 5) se règlent avec des curseurs ou des préréglages : *Équilibré*, *Scraping discret*, *Performance / volume*, *Rendu fidèle*. Elles sont mémorisées dans le navigateur ;
-- carte du gagnant (score, dauphins, meilleur navigateur par axe) et matrice navigateurs × axes colorée selon le score, avec la valeur mesurée dans chaque case.
+`npm run throughput` ouvre N pages dans **un seul** navigateur, chaque page dans son propre contexte isolé, comme un scraper qui garde ses sessions séparées. Les N pages se partagent une file de chargements. Pour chaque N, on mesure les pages par minute, les échecs et la mémoire moyenne et au pic. La **mémoire par page supplémentaire** est la pente de la mémoire au pic selon N. Résultats : `results/throughput/`, intégrés à l'agrégat et au dashboard.
 
-**Détails** :
+## Historique et campagne planifiée
 
-- tableau de synthèse par navigateur ;
-- matrice anti-bot navigateur × cible, avec code couleur et icône (✓ ≥ 80 %, ! 40–80 %, ✕ < 40 %) ;
-- temps de chargement médian par cible et par navigateur ;
-- mémoire moyenne et pic par navigateur ;
-- drill-down RAM et CPU dans le temps pour un run choisi, avec le moment de l'événement `load` ;
-- tableau détaillé navigateur × cible ;
-- filtres par navigateur et par cible, qui s'appliquent à toute la page. Mode sombre automatique.
+Chaque `npm run bench` ajoute un résumé daté dans `results/history/`, avec les versions des navigateurs.
+
+Le workflow [`campaign.yml`](.github/workflows/campaign.yml) lance chaque lundi une campagne complète et un test de débit. Il peut aussi être déclenché à la main avec des paramètres. Il :
+- publie le dashboard et les résultats en artefact ;
+- ajoute l'historique à la branche `bench-history`, relue à la campagne suivante.
+
+Les runners GitHub partagés sont bruyants : pour des chiffres comparables d'une semaine à l'autre, enregistrer un runner auto-hébergé dédié et mettre son label dans la variable de dépôt `BENCH_RUNNER`.
 
 ## Architecture
 
 ```
 src/
 ├── adapters/
-│   ├── base.ts          # interfaces BrowserAdapter / NavigationResult / AdapterDefinition
-│   ├── common.ts        # post-chargement partagé : attente, sondage du challenge, snapshot + hash DOM
-│   ├── registry.ts      # liste des adapters + alias
-│   ├── puppeteer.ts     # (+ navigatePuppeteerPage, réutilisé par Lightpanda)
-│   ├── playwright.ts    # chromium / firefox / webkit
+│   ├── base.ts              # BrowserAdapter / AdapterDefinition / PageHandle…
+│   ├── common.ts            # post-chargement partagé : attente, sondage anti-bot, snapshot + hash DOM
+│   ├── registry.ts          # liste des adapters + alias (playwright, selenium, stealth, vanilla)
+│   ├── puppeteer.ts         # (+ helpers réutilisés par puppeteer-stealth et Lightpanda)
+│   ├── puppeteer-stealth.ts
+│   ├── playwright.ts        # PlaywrightAdapter générique (moteur = lancement + connexion)
+│   ├── patchright.ts
+│   ├── camoufox.ts
 │   ├── lightpanda.ts
 │   └── selenium.ts
-├── antibot/evaluators.ts  # cloudflare, sannysoft, creepjs, deviceandbrowserinfo, generic
-├── monitor/
-│   ├── resource-sampler.ts  # API + backend Unix (pidusage)
-│   ├── line-probe.ts        # pilote d'échantillonneur externe (protocole ligne à ligne)
-│   ├── windows-probe.ts     # backend Windows (NtQuerySystemInformation)
-│   └── wsl-sampler.py       # backend WSL (/proc, USS)
-├── runner/                # campagne séquentielle, timeouts, kill d'arbre, JSON brut
-├── aggregate/aggregator.ts
-├── fixtures/server.ts     # pages local://
+├── antibot/evaluators.ts    # cloudflare, sannysoft, creepjs, deviceandbrowserinfo, generic
+├── monitor/                 # échantillonnage RAM/CPU : Unix (pidusage), Windows (NtQuerySystemInformation), WSL (/proc)
+├── network/byte-proxy.ts    # proxy de comptage d'octets
+├── runner/
+│   ├── benchmark-runner.ts  # campagne : ordre entrelacé, chauffe, modes, timeouts, kill d'arbre
+│   └── throughput-runner.ts # débit en parallèle
+├── aggregate/
+│   ├── aggregator.ts        # statistiques, IC 95 %, fidélité graduée, séries par run
+│   ├── visual.ts            # comparaison pixel à pixel des captures
+│   └── history.ts           # résumé par campagne
+├── fixtures/server.ts       # pages local://
 ├── config/targets.ts
 └── cli.ts
 dashboard/
@@ -220,20 +229,20 @@ dashboard/
 ### Ajouter un navigateur
 
 1. Créer `src/adapters/<nom>.ts` qui implémente `BrowserAdapter` :
-   - `launch()` démarre un navigateur neuf et renvoie le PID racine de son arbre (ou `null` s'il tourne hors de notre contrôle), avec `location: 'wsl'` si ce PID est un process de WSL ;
-   - `navigate(url, options)` mesure jusqu'à `load` puis délègue à `completeNavigation()` (snapshot, hash, anti-bot), avec un `evaluate(expression)` propre au driver ;
-   - `close()`, et `version()` en option.
-2. Exporter une `AdapterDefinition` (`create`, `checkAvailability`) et l'ajouter à `ADAPTERS` dans `registry.ts`.
+   - `launch({ proxyUrl })` démarre un navigateur neuf, qui passe par le proxy donné, et renvoie le PID racine de son arbre (`location: 'wsl'` si c'est un process de WSL) ;
+   - `navigate(url, options)` mesure jusqu'à `load` puis délègue à `completeNavigation()`, et bloque les ressources si `options.blockResources` ;
+   - `close()`, et en option `version()`, `screenshot(width, height)` et `openPages(count)` pour le test de débit.
+2. Exporter une `AdapterDefinition` (`create`, `checkAvailability`, `supportsLite`, `stealth`) et l'ajouter à `ADAPTERS` dans `registry.ts`.
 
-Rien d'autre à modifier : le runner, le monitoring, l'agrégation et le dashboard le prennent en charge. Un navigateur compatible CDP peut réutiliser `navigatePuppeteerPage()`, comme Lightpanda.
+Un navigateur compatible CDP peut réutiliser les helpers Puppeteer, comme Lightpanda. Un fork ou un wrapper de Playwright n'a qu'à fournir un `PlaywrightEngine`, comme patchright et camoufox.
 
 ## Dépannage
 
-- **`playwright-firefox` échoue avec `spawn UNKNOWN`** (Windows ; l'Observateur d'événements indique « Assembly dépendant mozglue introuvable »). Les navigateurs Playwright ont été installés depuis une **application Windows empaquetée** (MSIX), par exemple le terminal de l'app de bureau Claude. Ces applications redirigent `AppData` vers leur propre cache (`AppData\Local\Packages\<app>\LocalCache`), et le chargeur de Windows ne retrouve pas la DLL `mozglue` de Firefox à travers cette redirection. Chromium et WebKit ne sont pas concernés. Solution : installer les navigateurs hors d'`AppData`, en ajoutant par exemple `PLAYWRIGHT_BROWSERS_PATH=C:/Users/<vous>/.cache/ms-playwright` dans `.env`, puis `npm run install-browsers`.
-- **Selenium** : Selenium Manager résout (et télécharge si besoin) chromedriver et Chrome au premier lancement. Ce délai n'est pas compté dans le temps de lancement.
+- **Un navigateur basé sur Firefox (`playwright-firefox`, `camoufox`) échoue avec `spawn UNKNOWN`** sous Windows : ses fichiers ont été installés depuis une **application Windows empaquetée** (MSIX), par exemple le terminal de l'app de bureau Claude. Ces applications redirigent `AppData` vers leur cache privé (`AppData\Local\Packages\<app>\LocalCache`), et le chargeur de Windows n'y retrouve pas la DLL `mozglue` de Firefox. Il faut les installer hors d'`AppData` : `PLAYWRIGHT_BROWSERS_PATH` et `CAMOUFOX_INSTALL_DIR` dans `.env`, puis `npm run install-browsers` et `npx camoufox-js fetch`.
+- **Camoufox et le parallélisme** : dans nos essais, les chargements concurrents de Camoufox finissent en timeout dès 2 pages en parallèle, même en contextes séparés. Le tableau de débit l'indique.
+- **Selenium** : Selenium Manager résout, et télécharge si besoin, chromedriver et Chrome au premier lancement. Ce délai n'est pas compté dans le temps de lancement.
 
-## Hors scope v1
+## Hors scope
 
-- Exécution distribuée / cloud
-- Diff visuel pixel à pixel (v1 = hash de structure DOM)
-- Dashboard avec backend
+- Exécution distribuée
+- Dashboard avec backend (la page reste un fichier statique généré)

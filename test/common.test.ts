@@ -8,6 +8,7 @@ const snapshot = (overrides: Partial<PageSnapshot> = {}): PageSnapshot => ({
   html: '<html><body>ok</body></html>',
   text: 'ok',
   tags: 'HTML,HEAD,BODY',
+  tagCounts: { HTML: 1, HEAD: 1, BODY: 1 },
   elementCount: 3,
   textLength: 2,
   ...overrides,

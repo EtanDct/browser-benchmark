@@ -2,7 +2,9 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { AntiBotOutcome } from '../antibot/evaluators.js';
 import type { MemoryMetric } from '../monitor/resource-sampler.js';
-import type { EnvironmentInfo, RunRecord } from '../runner/types.js';
+import type { ThroughputLevel, ThroughputRecord } from '../runner/throughput-types.js';
+import type { EnvironmentInfo, RunMode, RunRecord } from '../runner/types.js';
+import type { VisualScore } from './visual.js';
 
 export interface Stats {
   n: number;
@@ -12,18 +14,35 @@ export interface Stats {
   min: number;
   max: number;
   p95: number;
+  /** 95 % confidence interval of the mean (Student t), [mean, mean] with a single run. */
+  ci95: [number, number];
 }
 
+/**
+ * One run, reduced to the values the dashboard's bootstrap needs to recompute the ranking on
+ * resampled runs. null = not measured for this run.
+ */
 export interface RunSeries {
   run: number;
   success: boolean;
   loadTimeMs: number;
+  launchMs: number | null;
+  memAvgMB: number | null;
+  cpuAvg: number | null;
+  /** Graded anti-bot score; 0 when the page never delivered a verdict; null outside anti-bot targets. */
+  abScore: number | null;
+  /** Similarity of this run's DOM to the cross-browser consensus (0-1). */
+  domSimilarity: number | null;
+  bytesDownMB: number | null;
   /** [t ms, memory MB, cpu % | null] */
   samples: Array<[number, number, number | null]>;
 }
 
 export interface Cell {
   browser: string;
+  adapter: string;
+  mode: RunMode;
+  stealth: boolean;
   browserVersion?: string;
   target: string;
   group: string;
@@ -39,6 +58,8 @@ export interface Cell {
   memPeakMB: Stats | null;
   cpuAvgPercent: Stats | null;
   cpuPeakPercent: Stats | null;
+  /** Downloaded MB per navigation, through the counting proxy (remote targets). */
+  networkMB: Stats | null;
   antiBot: {
     evaluated: number;
     passed: number;
@@ -48,13 +69,17 @@ export interface Cell {
     outcomes: Partial<Record<AntiBotOutcome, number>>;
   } | null;
   fidelity: {
-    /** Share of this browser's successful runs whose DOM structure hash equals the cross-browser consensus. */
+    /** Mean similarity of the DOM (tag counts, weighted Jaccard) to the cross-browser consensus. */
+    similarity: number;
+    /** Share of runs whose exact DOM structure hash equals the consensus hash. */
     matchRate: number;
     /** Distinct hashes across this browser's runs (>1 means the page itself is not deterministic). */
     distinctHashes: number;
     elementCountMedian: number;
     consensusElementCount: number;
   } | null;
+  /** Screenshot compared to the reference browser's, pixel by pixel. */
+  visual: VisualScore | null;
   errors: string[];
   series: RunSeries[];
 }
@@ -62,6 +87,8 @@ export interface Cell {
 export interface BrowserSummary {
   browser: string;
   browserVersion?: string;
+  stealth: boolean;
+  mode: RunMode;
   runs: number;
   successRate: number;
   antiBotPassRate: number | null;
@@ -69,7 +96,14 @@ export interface BrowserSummary {
   memAvgMB: number | null;
   memPeakMB: number | null;
   cpuAvgPercent: number | null;
-  fidelityMatchRate: number | null;
+  fidelitySimilarity: number | null;
+  networkMB: number | null;
+}
+
+export interface ThroughputSummary extends Omit<ThroughputRecord, 'schemaVersion' | 'environment'> {
+  bestPagesPerMinute: number | null;
+  /** Least-squares slope of peak memory against concurrency: memory cost of one more page. */
+  memPerPageMB: number | null;
 }
 
 export interface AggregatedReport {
@@ -86,13 +120,28 @@ export interface AggregatedReport {
     url: string;
     /** The page exposes individual checks, so its anti-bot score is graded rather than pass/fail only. */
     gradedAntiBot: boolean;
+    /** Browser whose screenshot the others are compared to, when screenshots exist. */
+    visualReference: string | null;
   }>;
   cells: Cell[];
   browserSummaries: BrowserSummary[];
+  throughput: ThroughputSummary[];
 }
 
 const MB = 2 ** 20;
 const MAX_SERIES_POINTS = 400;
+const round2 = (v: number) => Math.round(v * 100) / 100;
+
+/** Two-sided 95 % Student t critical values by degrees of freedom. */
+const T95: Array<[number, number]> = [
+  [1, 12.706], [2, 4.303], [3, 3.182], [4, 2.776], [5, 2.571], [6, 2.447], [7, 2.365], [8, 2.306], [9, 2.262],
+  [10, 2.228], [12, 2.179], [15, 2.131], [20, 2.086], [25, 2.06], [30, 2.042], [40, 2.021], [60, 2.0], [120, 1.98],
+];
+
+/** Rounds df up to the next tabulated value: slightly conservative between table rows. */
+function tCritical(df: number): number {
+  return T95.find(([d]) => df <= d)?.[1] ?? 1.96;
+}
 
 export function computeStats(values: number[]): Stats | null {
   if (!values.length) return null;
@@ -101,9 +150,19 @@ export function computeStats(values: number[]): Stats | null {
   const mean = sorted.reduce((sum, v) => sum + v, 0) / n;
   const median = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
   const variance = n > 1 ? sorted.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (n - 1) : 0;
+  const stddev = Math.sqrt(variance);
+  const halfWidth = n > 1 ? tCritical(n - 1) * stddev / Math.sqrt(n) : 0;
   const p95 = sorted[Math.min(n - 1, Math.ceil(0.95 * n) - 1)];
-  const round = (v: number) => Math.round(v * 100) / 100;
-  return { n, mean: round(mean), median: round(median), stddev: round(Math.sqrt(variance)), min: round(sorted[0]), max: round(sorted[n - 1]), p95: round(p95) };
+  return {
+    n,
+    mean: round2(mean),
+    median: round2(median),
+    stddev: round2(stddev),
+    min: round2(sorted[0]),
+    max: round2(sorted[n - 1]),
+    p95: round2(p95),
+    ci95: [round2(mean - halfWidth), round2(mean + halfWidth)],
+  };
 }
 
 function mostFrequent(values: string[]): string | undefined {
@@ -125,20 +184,80 @@ function downsample<T>(items: T[], max: number): T[] {
 
 function meanOf(values: Array<number | null | undefined>): number | null {
   const present = values.filter((v): v is number => typeof v === 'number');
-  return present.length ? Math.round((present.reduce((a, b) => a + b, 0) / present.length) * 100) / 100 : null;
+  return present.length ? round2(present.reduce((a, b) => a + b, 0) / present.length) : null;
 }
 
-export function aggregate(records: RunRecord[]): AggregatedReport {
+/** Weighted Jaccard of two tag-count vectors: 1 = same number of every element type. */
+export function tagSimilarity(a: Record<string, number>, b: Record<string, number>): number {
+  let intersection = 0;
+  let union = 0;
+  for (const tag of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    intersection += Math.min(a[tag] ?? 0, b[tag] ?? 0);
+    union += Math.max(a[tag] ?? 0, b[tag] ?? 0);
+  }
+  return union ? intersection / union : 1;
+}
+
+/** Per-tag median over every browser's runs: the DOM a "typical" browser builds for this page. */
+function consensusTagCounts(runs: RunRecord[]): Record<string, number> | null {
+  const withCounts = runs.map((r) => r.navigation.domTagCounts).filter((c): c is Record<string, number> => !!c);
+  if (!withCounts.length) return null;
+  const consensus: Record<string, number> = {};
+  for (const tag of new Set(withCounts.flatMap((c) => Object.keys(c)))) {
+    const value = median(withCounts.map((c) => c[tag] ?? 0));
+    if (value > 0) consensus[tag] = value;
+  }
+  return consensus;
+}
+
+function isAntiBotRun(r: RunRecord): boolean {
+  return r.targetGroup === 'antibot' || !!r.navigation.antiBot;
+}
+
+function summarizeThroughput(record: ThroughputRecord): ThroughputSummary {
+  // Levels with failures idle part of the time, which would bend the memory slope.
+  const levels = record.levels.filter((l) => l.memPeakMB !== null && l.successes === l.pages);
+  let memPerPageMB: number | null = null;
+  if (levels.length >= 2) {
+    const xs = levels.map((l) => l.concurrency);
+    const ys = levels.map((l) => l.memPeakMB!);
+    const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+    const sxx = xs.reduce((s, x) => s + (x - mx) ** 2, 0);
+    memPerPageMB = sxx ? round2(xs.reduce((s, x, i) => s + (x - mx) * (ys[i] - my), 0) / sxx) : null;
+  }
+  const { schemaVersion: _schema, environment: _env, ...rest } = record;
+  const best = record.levels.reduce<number | null>((max, l: ThroughputLevel) => (max === null || l.pagesPerMinute > max ? l.pagesPerMinute : max), null);
+  return { ...rest, bestPagesPerMinute: best, memPerPageMB };
+}
+
+export interface AggregateInputs {
+  visual?: Map<string, VisualScore>;
+  visualReferences?: Map<string, string>;
+  throughput?: ThroughputRecord[];
+}
+
+export function aggregate(records: RunRecord[], inputs: AggregateInputs = {}): AggregatedReport {
   const successful = records.filter((r) => r.navigation.success);
 
-  const consensusByTarget = new Map<string, { hash?: string; elementCount: number }>();
+  const consensusByTarget = new Map<string, { hash?: string; elementCount: number; tags: Record<string, number> | null }>();
   for (const target of new Set(records.map((r) => r.target))) {
     const runs = successful.filter((r) => r.target === target && r.navigation.domSnapshotHash);
     consensusByTarget.set(target, {
       hash: mostFrequent(runs.map((r) => r.navigation.domSnapshotHash!)),
       elementCount: median(runs.map((r) => r.navigation.domStats?.elementCount ?? 0)),
+      tags: consensusTagCounts(runs),
     });
   }
+
+  const similarityOf = (r: RunRecord): number | null => {
+    if (!r.navigation.success) return null;
+    const consensus = consensusByTarget.get(r.target);
+    if (consensus?.tags && r.navigation.domTagCounts) return tagSimilarity(r.navigation.domTagCounts, consensus.tags);
+    // Records written before tag counts existed: exact structure match or not.
+    if (consensus?.hash && r.navigation.domSnapshotHash) return r.navigation.domSnapshotHash === consensus.hash ? 1 : 0;
+    return null;
+  };
 
   const groups = new Map<string, RunRecord[]>();
   for (const record of records) {
@@ -157,15 +276,20 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
     for (const r of antiBotRuns) outcomes[r.navigation.antiBot!.outcome] = (outcomes[r.navigation.antiBot!.outcome] ?? 0) + 1;
     const passed = antiBotRuns.filter((r) => r.navigation.antiBot!.passed).length;
     // Records written before graded scores existed only carry pass/fail.
-    const scoreSum = antiBotRuns.reduce((sum, r) => sum + (r.navigation.antiBot!.score ?? (r.navigation.antiBot!.passed ? 1 : 0)), 0);
+    const scoreOf = (r: RunRecord) => r.navigation.antiBot ? (r.navigation.antiBot.score ?? (r.navigation.antiBot.passed ? 1 : 0)) : 0;
+    const scoreSum = antiBotRuns.reduce((sum, r) => sum + scoreOf(r), 0);
     // A run that never got a page counts as a failed anti-bot attempt for antibot targets.
-    const antiBotAttempts = runs.some((r) => r.targetGroup === 'antibot') || antiBotRuns.length ? runs.length : 0;
+    const antiBotAttempts = runs.some(isAntiBotRun) ? runs.length : 0;
 
     const hashed = ok.filter((r) => r.navigation.domSnapshotHash);
     const consensus = consensusByTarget.get(ref.target)!;
+    const similarities = ok.map(similarityOf).filter((s): s is number => s !== null);
 
     return {
       browser: ref.browser,
+      adapter: ref.adapter ?? ref.browser,
+      mode: ref.mode ?? 'full',
+      stealth: !!ref.stealth,
       browserVersion: runs.map((r) => r.browserVersion).find((v) => v && v !== 'unknown'),
       target: ref.target,
       group: ref.targetGroup,
@@ -181,26 +305,38 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
       memPeakMB: computeStats(summaries.flatMap((s) => (s.memBytes ? [s.memBytes.max / MB] : []))),
       cpuAvgPercent: computeStats(summaries.flatMap((s) => (s.cpuPercent ? [s.cpuPercent.avg] : []))),
       cpuPeakPercent: computeStats(summaries.flatMap((s) => (s.cpuPercent ? [s.cpuPercent.max] : []))),
+      networkMB: computeStats(ok.flatMap((r) => (r.network ? [r.network.bytesDown / MB] : []))),
       antiBot: antiBotAttempts
         ? { evaluated: antiBotAttempts, passed, passRate: passed / antiBotAttempts, meanScore: Math.round((scoreSum / antiBotAttempts) * 1000) / 1000, outcomes }
         : null,
-      fidelity: hashed.length && consensus.hash
+      fidelity: similarities.length
         ? {
-            matchRate: hashed.filter((r) => r.navigation.domSnapshotHash === consensus.hash).length / hashed.length,
+            similarity: Math.round((similarities.reduce((a, b) => a + b, 0) / similarities.length) * 1000) / 1000,
+            matchRate: hashed.length ? hashed.filter((r) => r.navigation.domSnapshotHash === consensus.hash).length / hashed.length : 0,
             distinctHashes: new Set(hashed.map((r) => r.navigation.domSnapshotHash)).size,
             elementCountMedian: median(hashed.map((r) => r.navigation.domStats?.elementCount ?? 0)),
             consensusElementCount: consensus.elementCount,
           }
         : null,
+      visual: inputs.visual?.get(`${ref.browser}\u0000${ref.target}`) ?? null,
       errors: [...new Set(runs.flatMap((r) => (r.navigation.success ? [] : [r.error ?? r.navigation.errorMessage ?? 'unknown error'])))].slice(0, 5),
-      series: runs.map((r) => ({
-        run: r.run,
-        success: r.navigation.success,
-        loadTimeMs: r.navigation.loadTimeMs,
-        samples: downsample(r.resources?.samples ?? [], MAX_SERIES_POINTS).map(
-          (s): [number, number, number | null] => [s.t, Math.round((s.memBytes / MB) * 10) / 10, s.cpuPercent === null ? null : Math.round(s.cpuPercent * 10) / 10],
-        ),
-      })),
+      series: runs.map((r) => {
+        const summary = r.resources?.summary;
+        return {
+          run: r.run,
+          success: r.navigation.success,
+          loadTimeMs: r.navigation.loadTimeMs,
+          launchMs: r.launchTimeMs ?? null,
+          memAvgMB: summary?.memBytes ? round2(summary.memBytes.avg / MB) : null,
+          cpuAvg: summary?.cpuPercent ? round2(summary.cpuPercent.avg) : null,
+          abScore: isAntiBotRun(r) ? scoreOf(r) : null,
+          domSimilarity: similarityOf(r),
+          bytesDownMB: r.network ? round2(r.network.bytesDown / MB) : null,
+          samples: downsample(r.resources?.samples ?? [], MAX_SERIES_POINTS).map(
+            (s): [number, number, number | null] => [s.t, Math.round((s.memBytes / MB) * 10) / 10, s.cpuPercent === null ? null : Math.round(s.cpuPercent * 10) / 10],
+          ),
+        };
+      }),
     };
   });
 
@@ -215,6 +351,8 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
     return {
       browser,
       browserVersion: own.map((c) => c.browserVersion).find(Boolean),
+      stealth: own[0].stealth,
+      mode: own[0].mode,
       runs,
       successRate: own.reduce((sum, c) => sum + c.successes, 0) / runs,
       antiBotPassRate: antiBotEvaluated ? antiBot.reduce((sum, c) => sum + c.antiBot!.passed, 0) / antiBotEvaluated : null,
@@ -222,7 +360,8 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
       memAvgMB: meanOf(own.map((c) => c.memAvgMB?.mean)),
       memPeakMB: own.reduce<number | null>((max, c) => (c.memPeakMB ? Math.max(max ?? 0, c.memPeakMB.max) : max), null),
       cpuAvgPercent: meanOf(own.map((c) => c.cpuAvgPercent?.mean)),
-      fidelityMatchRate: meanOf(own.map((c) => c.fidelity?.matchRate)),
+      fidelitySimilarity: meanOf(own.map((c) => c.fidelity?.similarity)),
+      networkMB: meanOf(own.map((c) => c.networkMB?.mean)),
     };
   });
 
@@ -230,7 +369,13 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
   const gradedTargets = new Set(
     records.filter((r) => { const s = r.navigation.antiBot?.score; return s !== undefined && s > 0 && s < 1; }).map((r) => r.target),
   );
-  const targets = [...new Map(cells.map((c) => [c.target, { name: c.target, group: c.group, url: c.url, gradedAntiBot: gradedTargets.has(c.target) }])).values()];
+  const targets = [...new Map(cells.map((c) => [c.target, {
+    name: c.target,
+    group: c.group,
+    url: c.url,
+    gradedAntiBot: gradedTargets.has(c.target),
+    visualReference: inputs.visualReferences?.get(c.target) ?? null,
+  }])).values()];
   const latest = [...records].sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
 
   return {
@@ -243,20 +388,29 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
     targets,
     cells,
     browserSummaries,
+    throughput: (inputs.throughput ?? []).map(summarizeThroughput).sort((a, b) => a.browser.localeCompare(b.browser)),
   };
 }
 
-export async function loadRawRecords(rawDir: string): Promise<RunRecord[]> {
+async function readJsonDir<T>(dir: string, accept: (value: T) => boolean): Promise<T[]> {
   let files: string[];
   try {
-    files = (await readdir(rawDir)).filter((f) => f.endsWith('.json'));
+    files = (await readdir(dir)).filter((f) => f.endsWith('.json'));
   } catch {
     return [];
   }
-  const records: RunRecord[] = [];
+  const values: T[] = [];
   for (const file of files) {
-    const record = JSON.parse(await readFile(path.join(rawDir, file), 'utf8')) as RunRecord;
-    if (record.schemaVersion === 1) records.push(record);
+    const value = JSON.parse(await readFile(path.join(dir, file), 'utf8')) as T;
+    if (accept(value)) values.push(value);
   }
-  return records;
+  return values;
+}
+
+export function loadRawRecords(rawDir: string): Promise<RunRecord[]> {
+  return readJsonDir<RunRecord>(rawDir, (r) => r.schemaVersion === 1);
+}
+
+export function loadThroughputRecords(dir: string): Promise<ThroughputRecord[]> {
+  return readJsonDir<ThroughputRecord>(dir, (r) => r.schemaVersion === 1);
 }
