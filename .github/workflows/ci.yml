@@ -35,6 +35,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor, which Chrome's sandbox needs:
+      # Puppeteer cannot launch Chrome otherwise (Playwright disables that sandbox by default).
+      - name: Allow Chrome's sandbox on Ubuntu 24.04
+        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
       - name: Install Lightpanda nightly
         run: |
           curl -fsSL -o "$RUNNER_TEMP/lightpanda" https://github.com/lightpanda-io/browser/releases/download/nightly/lightpanda-x86_64-linux
