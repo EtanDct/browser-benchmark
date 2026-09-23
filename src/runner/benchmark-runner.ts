@@ -1,12 +1,13 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { AdapterDefinition } from '../adapters/base.js';
+import type { AdapterDefinition, ProcessLocation } from '../adapters/base.js';
 import type { Target } from '../config/targets.js';
 import { startFixtureServer, type FixtureServer } from '../fixtures/server.js';
 import { ResourceSampler, summarizeSamples } from '../monitor/resource-sampler.js';
 import { killTree } from '../util/proc.js';
 import { errorMessage, sleep, TimeoutError, withTimeout } from '../util/time.js';
+import { wslKill } from '../util/wsl.js';
 import { RUN_SCHEMA_VERSION, type EnvironmentInfo, type RunRecord } from './types.js';
 
 export interface CampaignOptions {
@@ -49,13 +50,13 @@ interface RunContext {
   target: Target;
   url: string;
   run: number;
-  sampler: ResourceSampler | null;
+  samplers: Partial<Record<ProcessLocation, ResourceSampler>>;
   options: CampaignOptions;
   environment: EnvironmentInfo;
 }
 
 async function executeRun(ctx: RunContext): Promise<RunRecord> {
-  const { definition, target, options, sampler } = ctx;
+  const { definition, target, options } = ctx;
   const record: RunRecord = {
     schemaVersion: RUN_SCHEMA_VERSION,
     browser: definition.name,
@@ -71,17 +72,21 @@ async function executeRun(ctx: RunContext): Promise<RunRecord> {
 
   const adapter = definition.create();
   let pid: number | null = null;
-  let monitoring = false;
+  let location: ProcessLocation = 'host';
+  let sampler: ResourceSampler | undefined;
 
   try {
     const launchStart = Date.now();
-    ({ pid } = await withTimeout(adapter.launch(), options.launchTimeoutMs, 'launch'));
+    const launched = await withTimeout(adapter.launch(), options.launchTimeoutMs, 'launch');
+    pid = launched.pid;
+    location = launched.location ?? 'host';
     record.launchTimeMs = Date.now() - launchStart;
     record.browserVersion = await withTimeout(adapter.version?.() ?? Promise.resolve('unknown'), 5_000, 'version').catch(() => 'unknown');
 
-    if (pid !== null && sampler) {
-      sampler.begin(pid);
-      monitoring = true;
+    const locationSampler = ctx.samplers[location];
+    if (pid !== null && locationSampler) {
+      sampler = locationSampler;
+      locationSampler.begin(pid);
     }
     const navOptions = {
       timeoutMs: target.timeoutMs,
@@ -96,7 +101,7 @@ async function executeRun(ctx: RunContext): Promise<RunRecord> {
     record.timedOut = err instanceof TimeoutError;
     record.navigation = { ...record.navigation, success: false, errorMessage: record.navigation.errorMessage ?? record.error };
   } finally {
-    if (monitoring && sampler) {
+    if (sampler) {
       const samples = sampler.end();
       record.resources = {
         memoryMetric: sampler.memoryMetric,
@@ -111,7 +116,7 @@ async function executeRun(ctx: RunContext): Promise<RunRecord> {
       record.forcedKill = true;
     }
     // Kill whatever survived close(): a leaked renderer would skew the next run's measurements.
-    if (pid !== null && (record.forcedKill || record.timedOut)) await killTree(pid);
+    if (pid !== null && (record.forcedKill || record.timedOut)) await (location === 'wsl' ? wslKill(pid) : killTree(pid));
   }
   return record;
 }
@@ -134,6 +139,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
   const summary: CampaignSummary = { runs: 0, failures: 0, skippedBrowsers: [], files: [] };
 
   const adapters: AdapterDefinition[] = [];
+  const wslHostIps = new Set<string>();
   for (const definition of options.adapters) {
     const availability = await definition.checkAvailability();
     if (!availability.available) {
@@ -142,6 +148,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
       continue;
     }
     if (availability.reason) log(`note ${definition.name}: ${availability.reason}`);
+    if (availability.wslHostIp) wslHostIps.add(availability.wslHostIp);
     adapters.push(definition);
   }
   if (!adapters.length) {
@@ -151,13 +158,18 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
 
   await mkdir(options.rawDir, { recursive: true });
   let fixtures: FixtureServer | null = null;
-  if (options.targets.some((t) => t.url.startsWith('local://'))) fixtures = await startFixtureServer();
+  if (options.targets.some((t) => t.url.startsWith('local://'))) fixtures = await startFixtureServer([...wslHostIps]);
 
-  let sampler: ResourceSampler | null = null;
-  try {
-    sampler = await ResourceSampler.create(options.sampleIntervalMs);
-  } catch (err) {
-    log(`warning: resource monitoring disabled (${errorMessage(err)})`);
+  // The WSL sampler is started up front: it also keeps the WSL VM running, so a VM boot never
+  // lands inside a measured launch.
+  const samplers: Partial<Record<ProcessLocation, ResourceSampler>> = {};
+  const locations: ProcessLocation[] = wslHostIps.size ? ['host', 'wsl'] : ['host'];
+  for (const location of locations) {
+    try {
+      samplers[location] = await ResourceSampler.create(options.sampleIntervalMs, location);
+    } catch (err) {
+      log(`warning: ${location} resource monitoring disabled (${errorMessage(err)})`);
+    }
   }
 
   const environment = environmentInfo();
@@ -166,7 +178,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
       for (const target of options.targets) {
         const url = fixtures ? fixtures.resolve(target.url) : target.url;
         for (let run = 1; run <= options.runs; run++) {
-          const record = await executeRun({ definition, target, url, run, sampler, options, environment });
+          const record = await executeRun({ definition, target, url, run, samplers, options, environment });
           const file = path.join(options.rawDir, `${record.browser}_${record.target}_${record.run}.json`);
           await writeFile(file, JSON.stringify(record, null, 1));
           summary.runs++;
@@ -178,7 +190,7 @@ export async function runCampaign(options: CampaignOptions): Promise<CampaignSum
       }
     }
   } finally {
-    await sampler?.dispose();
+    await Promise.all(Object.values(samplers).map((s) => s.dispose()));
     await fixtures?.close();
   }
   return summary;

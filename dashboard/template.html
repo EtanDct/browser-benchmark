@@ -28,6 +28,8 @@
   --status-good: #0ca30c;
   --status-warning: #fab219;
   --status-critical: #d03b3b;
+  --scale-max: #184f95;
+  --scale-ink-strong: #ffffff;
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
@@ -48,6 +50,8 @@
     --series-6: #008300;
     --series-7: #9085e9;
     --series-8: #e66767;
+    --scale-max: #6da7ec;
+    --scale-ink-strong: #0b0b0b;
   }
 }
 :root[data-theme="dark"] {
@@ -68,6 +72,8 @@
   --series-6: #008300;
   --series-7: #9085e9;
   --series-8: #e66767;
+  --scale-max: #6da7ec;
+  --scale-ink-strong: #0b0b0b;
 }
 
 * { box-sizing: border-box; }
@@ -88,7 +94,7 @@ header h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
   background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
 }
 @media (min-width: 900px) {
-  .filters { position: sticky; top: 0; z-index: 5; }
+  .filters { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; }
 }
 .filter-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .filter-group > .label { color: var(--text-secondary); font-size: 12px; font-weight: 600; margin-right: 4px; text-transform: uppercase; letter-spacing: .04em; }
@@ -125,6 +131,12 @@ td { font-variant-numeric: tabular-nums; }
 
 .status { display: inline-flex; align-items: center; gap: 6px; color: var(--text-primary); }
 .status svg { flex: none; }
+.verdict { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.verdict .sub { color: var(--text-muted); font-size: 11px; }
+.meter-line { display: inline-flex; align-items: center; gap: 6px; }
+.meter { width: 48px; height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; flex: none; }
+.meter span { display: block; height: 100%; background: var(--text-secondary); }
+.antibot-summary { margin: 0 0 6px; font-weight: 600; }
 
 .drill-controls { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; align-items: center; }
 .drill-controls label { color: var(--text-secondary); font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
@@ -133,6 +145,66 @@ select {
   border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px;
 }
 .empty { color: var(--text-muted); padding: 32px 0; text-align: center; }
+
+.tabs { display: flex; gap: 4px; margin-top: 20px; border-bottom: 1px solid var(--grid); }
+.tabs button {
+  font: inherit; font-weight: 600; color: var(--text-secondary); background: none; border: 0;
+  padding: 8px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer;
+}
+.tabs button[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--series-1); }
+.tabs button:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; border-radius: 4px; }
+
+.ranking-top { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 0 16px; }
+.ranking-top > section { display: flex; flex-direction: column; }
+.ranking-top .card { flex: 1; }
+.winner-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.winner-name { font-size: 24px; font-weight: 700; display: inline-flex; align-items: center; gap: 10px; }
+.winner-name .swatch { width: 14px; height: 14px; }
+.winner-score { font-size: 24px; font-weight: 600; color: var(--text-secondary); }
+.winner-score small { font-size: 14px; font-weight: 400; }
+.winner-sub { color: var(--text-secondary); margin: 4px 0 14px; }
+.axis-winners { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px 16px; margin: 0; padding: 0; list-style: none; }
+.axis-winners li { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.axis-winners .axis { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+
+.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.presets button {
+  font: inherit; font-size: 13px; color: var(--text-primary); background: none; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 999px; padding: 3px 12px;
+}
+.presets button[aria-pressed="true"] { border-color: var(--series-1); color: var(--series-1); font-weight: 600; }
+.weights { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 20px; }
+.weights label { display: grid; grid-template-columns: 90px 1fr 18px; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
+.weights input[type="range"] { width: 100%; accent-color: var(--series-1); }
+.weights output { color: var(--text-primary); font-variant-numeric: tabular-nums; text-align: right; }
+
+table.ranking td.score { text-align: center; padding: 6px 8px; min-width: 88px; border-bottom: 2px solid var(--surface-1); }
+table.ranking td.score .v { display: block; font-size: 15px; font-weight: 600; }
+table.ranking td.score .raw { display: block; font-size: 11px; opacity: .85; }
+table.ranking td.score.best .v::after { content: " ★"; font-size: 12px; }
+table.ranking th.axis { text-align: center; }
+table.ranking td:nth-child(2), table.ranking th:nth-child(2) { text-align: left; }
+table.ranking td.rank { color: var(--text-muted); width: 28px; }
+table.ranking tr.first td { font-weight: 600; }
+.global { display: flex; align-items: center; gap: 8px; min-width: 150px; }
+.global .bar { flex: 1; height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; }
+.global .bar span { display: block; height: 100%; background: var(--series-1); border-radius: 4px; }
+.global b { width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+.note { margin-top: 10px; }
+
+th button.sort {
+  font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; white-space: nowrap;
+}
+th[aria-sort="ascending"] button.sort, th[aria-sort="descending"] button.sort { color: var(--text-primary); }
+th button.sort:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; border-radius: 3px; }
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; font-size: 13px; }
+.pager .muted { margin-right: auto; }
+.pager button {
+  font: inherit; min-width: 32px; padding: 4px 10px; cursor: pointer; color: var(--text-primary);
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px;
+}
+.pager button[aria-current="page"] { border-color: var(--series-1); color: var(--series-1); font-weight: 600; }
+.pager button:disabled { opacity: .4; cursor: default; }
 footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 </style>
 </head>
@@ -143,11 +215,42 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     <div class="meta" id="meta"></div>
   </header>
 
+  <nav class="tabs" role="tablist" aria-label="Vues">
+    <button type="button" role="tab" id="tab-ranking" aria-controls="view-ranking" aria-selected="true">Classement</button>
+    <button type="button" role="tab" id="tab-details" aria-controls="view-details" aria-selected="false">Détails</button>
+  </nav>
+
   <div class="filters" role="group" aria-label="Filtres">
     <div class="filter-group" id="browser-filters"><span class="label">Navigateurs</span></div>
     <div class="filter-group" id="target-filters"><span class="label">Cibles</span></div>
   </div>
 
+  <div id="view-ranking" role="tabpanel" aria-labelledby="tab-ranking">
+    <div class="ranking-top">
+      <section>
+        <h2>Meilleur navigateur</h2>
+        <p class="hint">Selon les pondérations choisies, sur les navigateurs et cibles sélectionnés.</p>
+        <div class="card" id="winner"></div>
+      </section>
+      <section>
+        <h2>Pondérations</h2>
+        <p class="hint">Ce qui compte pour ton usage. Le classement se met à jour en direct.</p>
+        <div class="card">
+          <div class="presets" id="presets" role="group" aria-label="Préréglages"></div>
+          <div class="weights" id="weights"></div>
+        </div>
+      </section>
+    </div>
+
+    <section>
+      <h2>Comparaison croisée</h2>
+      <p class="hint">Chaque case est un score sur 100 (plus foncé = meilleur), avec la valeur mesurée en dessous. Performance (vitesse, démarrage, mémoire, CPU) : score relatif au meilleur navigateur, cible par cible (2× plus lent que le meilleur = 50), puis moyenné sur les cibles. Anti-bot, fidélité et fiabilité : taux absolus. Survoler une case pour le détail.</p>
+      <div class="card table-wrap"><table id="ranking-table" class="ranking"></table></div>
+      <p class="hint note" id="ranking-notes"></p>
+    </section>
+  </div>
+
+  <div id="view-details" role="tabpanel" aria-labelledby="tab-details" hidden>
   <section>
     <h2>Vue d'ensemble</h2>
     <p class="hint">Agrégé sur les cibles sélectionnées. Temps de chargement = moyenne des médianes par cible ; mémoire = <span id="mem-metric"></span>, somme sur tout l'arbre de process.</p>
@@ -156,7 +259,8 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
   <section>
     <h2>Anti-bot</h2>
-    <p class="hint">Taux de passage par navigateur et par cible anti-bot. ✓ ≥ 80 %, ! 40–80 %, ✕ &lt; 40 %. Survoler une cellule pour le détail des verdicts.</p>
+    <p class="antibot-summary" id="antibot-summary"></p>
+    <p class="hint">Chaque case : le <strong>verdict</strong> de la page (✓ passé, ✕ repéré ou bloqué, ! sans verdict : le script de détection n'a pas tourné dans ce navigateur), puis, sur les pages qui détaillent leurs tests (sannysoft, CreepJS, deviceandbrowserinfo), la <strong>barre des contrôles réussis</strong>. Un seul contrôle raté suffit pour être repéré : on peut donc réussir 87 % des contrôles et prendre quand même une croix. Browserscan et Cloudflare ne répondent que oui ou non. Survoler une case pour le détail des runs.</p>
     <div class="card table-wrap"><table id="antibot-table"></table></div>
   </section>
 
@@ -202,8 +306,12 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   <section>
     <h2>Détail navigateur × cible</h2>
     <p class="hint">Fidélité = part des runs dont la structure DOM (hash de la séquence de balises) est identique au consensus inter-navigateurs pour cette cible.</p>
-    <div class="card table-wrap"><table id="detail-table"></table></div>
+    <div class="card">
+      <div class="table-wrap"><table id="detail-table"></table></div>
+      <nav class="pager" id="detail-pager" aria-label="Pagination du détail"></nav>
+    </div>
   </section>
+  </div>
 
   <footer id="footer"></footer>
 </main>
@@ -262,12 +370,35 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     warning: '<path d="M8 1.8l6.5 12H1.5z" fill="var(--status-warning)"/><path d="M8 6v3.5M8 11.6v.1" stroke="#0b0b0b" stroke-width="1.6" stroke-linecap="round"/>',
     critical: '<path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="var(--status-critical)" stroke-width="2.2" stroke-linecap="round"/>'
   };
-  function statusBadge(rate, title) {
+  function statusBadge(rate, title, note) {
     var level = rate >= 0.8 ? 'good' : rate >= 0.4 ? 'warning' : 'critical';
     var wrap = el('span', { class: 'status', title: title || '' });
     wrap.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">' + STATUS_ICONS[level] + '</svg>';
     wrap.appendChild(document.createTextNode(pct(rate)));
+    if (note) wrap.appendChild(el('span', { class: 'muted', text: note }));
     return wrap;
+  }
+
+  var OUTCOME_LABELS = { passed: 'passé', challenge: 'challenge', blocked: 'bloqué', detected: 'détecté', unknown: 'sans verdict' };
+  function dominantOutcome(outcomes) {
+    return Object.keys(outcomes).sort(function (a, b) { return outcomes[b] - outcomes[a]; })[0] || null;
+  }
+
+  function verdictBadge(level, label, title, sub) {
+    var line = el('span', { class: 'status' });
+    line.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">' + STATUS_ICONS[level] + '</svg>';
+    line.appendChild(document.createTextNode(label));
+    return el('span', { class: 'verdict', title: title || '' }, [line, sub || null]);
+  }
+
+  /** Neutral grey gauge: how far the browser got before being flagged, deliberately not a status color. */
+  function checksMeter(share, suffix) {
+    var fill = el('span');
+    fill.style.width = Math.round(Math.max(0, Math.min(1, share)) * 100) + '%';
+    return el('span', { class: 'meter-line' }, [
+      el('span', { class: 'meter', 'aria-hidden': 'true' }, [fill]),
+      el('span', { class: 'sub', text: pct(share) + ' des contrôles réussis' + (suffix || '') })
+    ]);
   }
 
   function visibleCells() {
@@ -292,9 +423,14 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       env.totalMemBytes ? fmt(env.totalMemBytes / Math.pow(2, 30), 0, ' Go RAM') : null,
       env.nodeVersion ? 'Node ' + env.nodeVersion : null
     ].filter(Boolean).forEach(function (text) { meta.appendChild(el('span', { text: text })); });
-    document.getElementById('mem-metric').textContent = data.memoryMetric === 'private-working-set'
-      ? 'private working set (mémoire propre, hors pages partagées)'
-      : data.memoryMetric === 'rss' ? 'RSS' : 'non mesurée';
+    var METRIC_LABELS = {
+      'private-working-set': 'private working set (Windows)',
+      uss: 'USS (Linux/WSL)',
+      rss: 'RSS, pages partagées incluses'
+    };
+    document.getElementById('mem-metric').textContent = data.memoryMetrics.length
+      ? data.memoryMetrics.map(function (m) { return METRIC_LABELS[m] || m; }).join(' / ') + (data.memoryMetrics.indexOf('rss') < 0 ? ' : mémoire propre au navigateur, hors pages partagées' : '')
+      : 'non mesurée';
     document.getElementById('footer').textContent = 'Généré depuis results/aggregated.json — régénérer avec npm run dashboard.';
   }
 
@@ -302,22 +438,32 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     var bf = document.getElementById('browser-filters');
     data.browsers.forEach(function (b) {
       var input = el('input', { type: 'checkbox', checked: '' });
-      input.addEventListener('change', function () { input.checked ? state.browsers.add(b) : state.browsers.delete(b); update(); });
+      input.addEventListener('change', function () { input.checked ? state.browsers.add(b) : state.browsers.delete(b); detailPage = 0; update(); });
       bf.appendChild(el('label', { class: 'chip' }, [input, swatch(b), b]));
     });
     var tf = document.getElementById('target-filters');
     data.targets.forEach(function (t) {
       var input = el('input', { type: 'checkbox', checked: '' });
-      input.addEventListener('change', function () { input.checked ? state.targets.add(t.name) : state.targets.delete(t.name); update(); });
+      input.addEventListener('change', function () { input.checked ? state.targets.add(t.name) : state.targets.delete(t.name); detailPage = 0; update(); });
       tf.appendChild(el('label', { class: 'chip', title: t.group + ' — ' + t.url }, [input, t.name]));
     });
   }
 
   // ---------- tables ----------
+  function cellDiscretion(c) {
+    return typeof c.antiBot.meanScore === 'number' ? c.antiBot.meanScore : c.antiBot.passRate;
+  }
+  // Graded stealth over several cells, weighted by the number of evaluated runs.
+  function discretionOf(cells) {
+    var ab = cells.filter(function (c) { return c.antiBot; });
+    var runs = ab.reduce(function (s, c) { return s + c.antiBot.evaluated; }, 0);
+    return runs ? ab.reduce(function (s, c) { return s + cellDiscretion(c) * c.antiBot.evaluated; }, 0) / runs : null;
+  }
+
   function renderSummary() {
     var table = document.getElementById('summary-table');
     table.replaceChildren();
-    var head = ['Navigateur', 'Runs', 'Succès', 'Anti-bot', 'Chargement', 'RAM moy.', 'RAM pic', 'CPU moy.', 'Fidélité DOM'];
+    var head = ['Navigateur', 'Runs', 'Succès', 'Anti-bot passé', 'Contrôles réussis', 'Chargement', 'RAM moy.', 'RAM pic', 'CPU moy.', 'Fidélité DOM'];
     table.appendChild(el('thead', {}, [el('tr', {}, head.map(function (h) { return el('th', { text: h }); }))]));
     var body = el('tbody');
     var cells = visibleCells();
@@ -334,7 +480,8 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         el('td', {}, [browserLabel(b, versionOf(b))]),
         el('td', { text: String(runs) }),
         el('td', { text: pct(successes / runs) }),
-        el('td', {}, [abEval ? statusBadge(abPass / abEval, abPass + '/' + abEval + ' runs') : el('span', { class: 'muted', text: '—' })]),
+        el('td', {}, [abEval ? statusBadge(abPass / abEval, abPass + '/' + abEval + ' runs non bloqués') : el('span', { class: 'muted', text: '—' })]),
+        el('td', { text: pct(discretionOf(own)), title: 'part moyenne des contrôles de détection réussis, même quand le navigateur est repéré' }),
         el('td', { text: fmt(mean(own.map(function (c) { return c.loadTimeMs && c.loadTimeMs.median; })), 0, ' ms') }),
         el('td', { text: fmt(mean(own.map(function (c) { return c.memAvgMB && c.memAvgMB.mean; })), 0, ' Mo') }),
         el('td', { text: peak ? fmt(peak, 0, ' Mo') : '—' }),
@@ -365,46 +512,131 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       targets.forEach(function (t) {
         var cell = data.cells.find(function (c) { return c.browser === b && c.target === t.name; });
         if (!cell || !cell.antiBot) { row.push(el('td', { class: 'muted', text: '—' })); return; }
-        totalEval += cell.antiBot.evaluated;
-        totalPass += cell.antiBot.passed;
-        var detail = Object.keys(cell.antiBot.outcomes).map(function (k) { return k + ' ×' + cell.antiBot.outcomes[k]; }).join(', ');
-        var withVerdict = Object.keys(cell.antiBot.outcomes).reduce(function (s, k) { return s + cell.antiBot.outcomes[k]; }, 0);
-        if (cell.antiBot.evaluated > withVerdict) detail += (detail ? ', ' : '') + 'page non chargée ×' + (cell.antiBot.evaluated - withVerdict);
-        row.push(el('td', {}, [statusBadge(cell.antiBot.passRate, detail)]));
+        var ab = cell.antiBot;
+        totalEval += ab.evaluated;
+        totalPass += ab.passed;
+        var detail = Object.keys(ab.outcomes).map(function (k) { return (OUTCOME_LABELS[k] || k) + ' ×' + ab.outcomes[k]; }).join(', ');
+        var withVerdict = Object.keys(ab.outcomes).reduce(function (s, k) { return s + ab.outcomes[k]; }, 0);
+        if (ab.evaluated > withVerdict) detail += (detail ? ', ' : '') + 'page non chargée ×' + (ab.evaluated - withVerdict);
+
+        var dominant = dominantOutcome(ab.outcomes);
+        var level, label;
+        if (ab.passed === ab.evaluated) { level = 'good'; label = 'passé'; }
+        else if (ab.passed > 0) { level = 'warning'; label = 'passé ' + ab.passed + '/' + ab.evaluated; }
+        else if (!dominant) { level = 'critical'; label = 'non chargée'; }
+        else { level = dominant === 'unknown' ? 'warning' : 'critical'; label = OUTCOME_LABELS[dominant] || dominant; }
+        // Only pages that expose individual checks can say how close to passing the browser came.
+        var sub = t.gradedAntiBot && dominant !== 'unknown' && ab.passed < ab.evaluated ? checksMeter(cellDiscretion(cell)) : null;
+        row.push(el('td', {}, [verdictBadge(level, label, detail, sub)]));
       });
-      row.push(el('td', {}, [totalEval ? statusBadge(totalPass / totalEval, totalPass + '/' + totalEval + ' runs') : el('span', { class: 'muted', text: '—' })]));
+      var own = data.cells.filter(function (c) { return c.browser === b && targets.some(function (t) { return t.name === c.target; }); });
+      var rate = totalEval ? totalPass / totalEval : 0;
+      row.push(el('td', {}, [totalEval
+        ? verdictBadge(rate >= 0.8 ? 'good' : rate >= 0.4 ? 'warning' : 'critical', totalPass + '/' + totalEval + ' runs passés', 'runs ni repérés ni bloqués ; la barre moyenne toutes les pages, une page oui/non comptant 0 ou 100 %', checksMeter(discretionOf(own), ', en moyenne'))
+        : el('span', { class: 'muted', text: '—' })]));
       body.appendChild(el('tr', {}, row));
     });
     table.appendChild(body);
+
+    var shown = data.cells.filter(function (c) {
+      return c.antiBot && state.browsers.has(c.browser) && targets.some(function (t) { return t.name === c.target; });
+    });
+    var allRuns = shown.reduce(function (s, c) { return s + c.antiBot.evaluated; }, 0);
+    var allPassed = shown.reduce(function (s, c) { return s + c.antiBot.passed; }, 0);
+    document.getElementById('antibot-summary').textContent = allPassed === 0
+      ? 'Aucun navigateur ne passe : les ' + allRuns + ' runs anti-bot sont tous repérés ou bloqués. Les barres montrent jusqu’où chacun tient avant d’être démasqué.'
+      : allPassed + ' runs anti-bot sur ' + allRuns + ' passent sans être repérés.';
+  }
+
+  var DETAIL_PAGE_SIZE = 25;
+  var detailPage = 0;
+  var detailSort = { key: 'load', dir: 1 };
+  function stat(s, field) { return s ? s[field] : null; }
+  // dir: default direction when the column is first clicked (1 = ascending, -1 = descending).
+  var DETAIL_COLUMNS = [
+    { key: 'browser', label: 'Navigateur', dir: 1, value: function (c) { return c.browser; }, render: function (c) { return el('td', {}, [browserLabel(c.browser)]); } },
+    { key: 'target', label: 'Cible', dir: 1, value: function (c) { return c.target; }, render: function (c) { return el('td', { class: 'left', title: c.url, text: c.target }); } },
+    { key: 'success', label: 'Succès', dir: -1, value: function (c) { return c.successRate; }, render: function (c) { return el('td', { text: c.successes + '/' + c.runs + (c.timeouts ? ' (' + c.timeouts + ' timeout)' : '') }); } },
+    { key: 'load', label: 'Chargement méd.', dir: 1, value: function (c) { return stat(c.loadTimeMs, 'median'); }, render: function (c) { return el('td', { text: fmt(stat(c.loadTimeMs, 'median'), 0, ' ms') }); } },
+    { key: 'mean', label: 'moy. ± σ', dir: 1, value: function (c) { return stat(c.loadTimeMs, 'mean'); }, render: function (c) { return el('td', { text: c.loadTimeMs ? fmt(c.loadTimeMs.mean, 0) + ' ± ' + fmt(c.loadTimeMs.stddev, 0) : '—' }); } },
+    { key: 'p95', label: 'p95', dir: 1, value: function (c) { return stat(c.loadTimeMs, 'p95'); }, render: function (c) { return el('td', { text: fmt(stat(c.loadTimeMs, 'p95'), 0, ' ms') }); } },
+    { key: 'launch', label: 'Lancement', dir: 1, value: function (c) { return stat(c.launchTimeMs, 'median'); }, render: function (c) { return el('td', { text: fmt(stat(c.launchTimeMs, 'median'), 0, ' ms') }); } },
+    { key: 'memAvg', label: 'RAM moy.', dir: 1, value: function (c) { return stat(c.memAvgMB, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.memAvgMB, 'mean'), 0, ' Mo') }); } },
+    { key: 'memPeak', label: 'RAM pic', dir: 1, value: function (c) { return stat(c.memPeakMB, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.memPeakMB, 'mean'), 0, ' Mo') }); } },
+    { key: 'cpuAvg', label: 'CPU moy.', dir: 1, value: function (c) { return stat(c.cpuAvgPercent, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.cpuAvgPercent, 'mean'), 0, ' %') }); } },
+    { key: 'cpuPeak', label: 'CPU pic', dir: 1, value: function (c) { return stat(c.cpuPeakPercent, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.cpuPeakPercent, 'mean'), 0, ' %') }); } },
+    { key: 'fidelity', label: 'Fidélité', dir: -1, value: function (c) { return stat(c.fidelity, 'matchRate'); }, render: function (c) { var f = c.fidelity; return el('td', { text: f ? pct(f.matchRate) + (f.distinctHashes > 1 ? ' (' + f.distinctHashes + ' variantes)' : '') : '—' }); } },
+    { key: 'elements', label: 'Éléments DOM', dir: -1, value: function (c) { return stat(c.fidelity, 'elementCountMedian'); }, render: function (c) { var f = c.fidelity; return el('td', { text: f ? fmt(f.elementCountMedian, 0) + ' / ' + fmt(f.consensusElementCount, 0) : '—', title: 'médiane de ce navigateur / consensus' }); } },
+    { key: 'errors', label: 'Erreurs', dir: -1, value: function (c) { return c.errors.length; }, render: function (c) { return el('td', { class: 'err', title: c.errors.join('\n'), text: c.errors[0] || '' }); } }
+  ];
+
+  function sortedDetailCells() {
+    var column = DETAIL_COLUMNS.find(function (col) { return col.key === detailSort.key; });
+    return visibleCells().slice().sort(function (a, b) {
+      var va = column.value(a), vb = column.value(b);
+      var missingA = va === null || va === undefined, missingB = vb === null || vb === undefined;
+      // Missing values always sink to the bottom, whatever the direction.
+      if (missingA || missingB) return missingA === missingB ? 0 : missingA ? 1 : -1;
+      var cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
+      return cmp * detailSort.dir || a.browser.localeCompare(b.browser) || a.target.localeCompare(b.target);
+    });
   }
 
   function renderDetail() {
     var table = document.getElementById('detail-table');
     table.replaceChildren();
-    var head = ['Navigateur', 'Cible', 'Succès', 'Chargement méd.', 'moy. ± σ', 'p95', 'Lancement', 'RAM moy.', 'RAM pic', 'CPU moy.', 'CPU pic', 'Fidélité', 'Éléments DOM', 'Erreurs'];
-    table.appendChild(el('thead', {}, [el('tr', {}, head.map(function (h) { return el('th', { text: h }); }))]));
+    var headRow = el('tr', {}, DETAIL_COLUMNS.map(function (col) {
+      var active = detailSort.key === col.key;
+      var btn = el('button', { type: 'button', class: 'sort', text: col.label + (active ? (detailSort.dir === 1 ? ' ▲' : ' ▼') : '') });
+      btn.addEventListener('click', function () {
+        detailSort = active ? { key: col.key, dir: -detailSort.dir } : { key: col.key, dir: col.dir };
+        detailPage = 0;
+        renderDetail();
+      });
+      return el('th', { 'aria-sort': active ? (detailSort.dir === 1 ? 'ascending' : 'descending') : 'none' }, [btn]);
+    }));
+    table.appendChild(el('thead', {}, [headRow]));
+
+    var cells = sortedDetailCells();
+    var pages = Math.max(1, Math.ceil(cells.length / DETAIL_PAGE_SIZE));
+    detailPage = Math.min(detailPage, pages - 1);
+    var start = detailPage * DETAIL_PAGE_SIZE;
     var body = el('tbody');
-    visibleCells().forEach(function (c) {
-      var fid = c.fidelity;
-      body.appendChild(el('tr', {}, [
-        el('td', {}, [browserLabel(c.browser)]),
-        el('td', { class: 'left', title: c.url, text: c.target }),
-        el('td', { text: c.successes + '/' + c.runs + (c.timeouts ? ' (' + c.timeouts + ' timeout)' : '') }),
-        el('td', { text: fmt(c.loadTimeMs && c.loadTimeMs.median, 0, ' ms') }),
-        el('td', { text: c.loadTimeMs ? fmt(c.loadTimeMs.mean, 0) + ' ± ' + fmt(c.loadTimeMs.stddev, 0) : '—' }),
-        el('td', { text: fmt(c.loadTimeMs && c.loadTimeMs.p95, 0, ' ms') }),
-        el('td', { text: fmt(c.launchTimeMs && c.launchTimeMs.median, 0, ' ms') }),
-        el('td', { text: fmt(c.memAvgMB && c.memAvgMB.mean, 0, ' Mo') }),
-        el('td', { text: fmt(c.memPeakMB && c.memPeakMB.mean, 0, ' Mo') }),
-        el('td', { text: fmt(c.cpuAvgPercent && c.cpuAvgPercent.mean, 0, ' %') }),
-        el('td', { text: fmt(c.cpuPeakPercent && c.cpuPeakPercent.mean, 0, ' %') }),
-        el('td', { text: fid ? pct(fid.matchRate) + (fid.distinctHashes > 1 ? ' (' + fid.distinctHashes + ' variantes)' : '') : '—' }),
-        el('td', { text: fid ? fmt(fid.elementCountMedian, 0) + ' / ' + fmt(fid.consensusElementCount, 0) : '—', title: 'médiane de ce navigateur / consensus' }),
-        el('td', { class: 'err', title: c.errors.join('\n'), text: c.errors[0] || '' })
-      ]));
+    cells.slice(start, start + DETAIL_PAGE_SIZE).forEach(function (c) {
+      body.appendChild(el('tr', {}, DETAIL_COLUMNS.map(function (col) { return col.render(c); })));
     });
-    if (!body.children.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(head.length), text: 'Aucune donnée pour cette sélection' })]));
+    if (!cells.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(DETAIL_COLUMNS.length), text: 'Aucune donnée pour cette sélection' })]));
     table.appendChild(body);
+    renderPager(cells.length, pages, start);
+  }
+
+  function renderPager(total, pages, start) {
+    var pager = document.getElementById('detail-pager');
+    pager.replaceChildren();
+    if (!total) return;
+    function go(page) {
+      return function () {
+        detailPage = page;
+        renderDetail();
+        document.getElementById('detail-table').scrollIntoView({ block: 'nearest' });
+      };
+    }
+    pager.appendChild(el('span', { class: 'muted', text: 'Lignes ' + (start + 1) + '–' + Math.min(start + DETAIL_PAGE_SIZE, total) + ' sur ' + total }));
+    if (pages === 1) return;
+    var prev = el('button', { type: 'button', text: '‹ Précédent' });
+    prev.disabled = detailPage === 0;
+    prev.addEventListener('click', go(detailPage - 1));
+    pager.appendChild(prev);
+    for (var p = 0; p < pages; p++) {
+      var btn = el('button', { type: 'button', text: String(p + 1), 'aria-label': 'Page ' + (p + 1) });
+      if (p === detailPage) btn.setAttribute('aria-current', 'page');
+      btn.addEventListener('click', go(p));
+      pager.appendChild(btn);
+    }
+    var next = el('button', { type: 'button', text: 'Suivant ›' });
+    next.disabled = detailPage === pages - 1;
+    next.addEventListener('click', go(detailPage + 1));
+    pager.appendChild(next);
   }
 
   // ---------- charts ----------
@@ -562,7 +794,260 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     renderDrillCharts(cell);
   });
 
+  // ---------- ranking ----------
+  // relative axes: per target, score = best / value (lower is better), then averaged over targets.
+  // absolute axes: rates already on a 0-1 scale.
+  var AXES = [
+    { key: 'antibot', label: 'Anti-bot', kind: 'absolute', help: 'part des contrôles de détection réussis, même quand le navigateur finit repéré',
+      value: function (c) { return c.antiBot ? (typeof c.antiBot.meanScore === 'number' ? c.antiBot.meanScore : c.antiBot.passRate) : null; },
+      raw: function (v) { return fmt(v * 100, 0, ' % des contrôles réussis'); } },
+    { key: 'speed', label: 'Vitesse', kind: 'relative', help: 'temps de chargement médian (début de navigation → load)',
+      value: function (c) { return c.loadTimeMs ? c.loadTimeMs.median : null; },
+      raw: function (v) { return fmt(v, 0, ' ms'); } },
+    { key: 'launch', label: 'Démarrage', kind: 'relative', help: 'temps de lancement du navigateur',
+      value: function (c) { return c.launchTimeMs ? c.launchTimeMs.median : null; },
+      raw: function (v) { return fmt(v, 0, ' ms'); } },
+    { key: 'memory', label: 'Mémoire', kind: 'relative', help: 'mémoire moyenne pendant le run',
+      value: function (c) { return c.memAvgMB ? c.memAvgMB.mean : null; },
+      raw: function (v) { return fmt(v, 0, ' Mo'); } },
+    // +5 points of CPU on both sides so a near-idle 0-1 % browser does not crush everyone else to 0.
+    { key: 'cpu', label: 'CPU', kind: 'relative', epsilon: 5, help: 'CPU moyen, en % d’un cœur',
+      value: function (c) { return c.cpuAvgPercent ? c.cpuAvgPercent.mean : null; },
+      raw: function (v) { return fmt(v, 0, ' %'); } },
+    { key: 'fidelity', label: 'Fidélité', kind: 'absolute', help: 'part des runs dont le DOM est identique au consensus inter-navigateurs',
+      value: function (c) { return c.fidelity ? c.fidelity.matchRate : null; },
+      raw: function (v) { return pct(v) + ' identique'; } },
+    { key: 'reliability', label: 'Fiabilité', kind: 'absolute', help: 'part des runs réussis (chargement + capture)',
+      value: function (c) { return c.successRate; },
+      raw: function (v) { return pct(v) + ' réussis'; } }
+  ];
+
+  var PRESETS = [
+    { id: 'balanced', label: 'Équilibré', weights: { antibot: 1, speed: 1, launch: 1, memory: 1, cpu: 1, fidelity: 1, reliability: 1 } },
+    { id: 'stealth', label: 'Scraping discret', weights: { antibot: 5, speed: 1, launch: 0, memory: 1, cpu: 1, fidelity: 2, reliability: 3 } },
+    { id: 'volume', label: 'Performance / volume', weights: { antibot: 0, speed: 3, launch: 2, memory: 3, cpu: 2, fidelity: 1, reliability: 2 } },
+    { id: 'rendering', label: 'Rendu fidèle', weights: { antibot: 0, speed: 1, launch: 0, memory: 1, cpu: 1, fidelity: 5, reliability: 3 } }
+  ];
+
+  var weights = Object.assign({}, PRESETS[0].weights);
+  try {
+    var savedWeights = JSON.parse(localStorage.getItem('bench-weights') || 'null');
+    if (savedWeights) AXES.forEach(function (a) { if (typeof savedWeights[a.key] === 'number') weights[a.key] = savedWeights[a.key]; });
+  } catch (e) { /* storage unavailable: defaults */ }
+
+  function computeRanking() {
+    var cells = visibleCells();
+    var browsers = visibleBrowsers().filter(function (b) { return cells.some(function (c) { return c.browser === b; }); });
+    var targets = [];
+    cells.forEach(function (c) { if (targets.indexOf(c.target) < 0) targets.push(c.target); });
+    var rows = browsers.map(function (b) { return { browser: b, score: {}, raw: {}, targets: {} }; });
+
+    AXES.forEach(function (axis) {
+      var acc = {};
+      browsers.forEach(function (b) { acc[b] = { scores: [], raws: [] }; });
+      targets.forEach(function (t) {
+        var entries = [];
+        browsers.forEach(function (b) {
+          var cell = cells.find(function (c) { return c.browser === b && c.target === t; });
+          var v = cell ? axis.value(cell) : null;
+          if (typeof v === 'number' && isFinite(v)) entries.push({ browser: b, v: v });
+        });
+        if (axis.kind === 'relative') {
+          if (entries.length < 2) return;
+          var eps = axis.epsilon || 0;
+          var best = Math.min.apply(null, entries.map(function (e) { return e.v; }));
+          entries.forEach(function (e) { acc[e.browser].scores.push((best + eps) / (e.v + eps)); acc[e.browser].raws.push(e.v); });
+        } else {
+          entries.forEach(function (e) { acc[e.browser].scores.push(e.v); acc[e.browser].raws.push(e.v); });
+        }
+      });
+      rows.forEach(function (r) {
+        var a = acc[r.browser];
+        r.score[axis.key] = a.scores.length ? 100 * mean(a.scores) : null;
+        r.raw[axis.key] = a.raws.length ? mean(a.raws) : null;
+        r.targets[axis.key] = a.scores.length;
+      });
+    });
+
+    rows.forEach(function (r) {
+      var sum = 0, total = 0;
+      AXES.forEach(function (a) {
+        if (r.score[a.key] === null || !weights[a.key]) return;
+        sum += r.score[a.key] * weights[a.key];
+        total += weights[a.key];
+      });
+      r.total = total ? sum / total : null;
+    });
+    rows.sort(function (a, b) { return (b.total === null ? -1 : b.total) - (a.total === null ? -1 : a.total); });
+    return { rows: rows, targets: targets, cells: cells };
+  }
+
+  function bestPerAxis(rows) {
+    var best = {};
+    AXES.forEach(function (a) {
+      var top = null;
+      rows.forEach(function (r) { if (r.score[a.key] !== null && (top === null || r.score[a.key] > top.score[a.key] + 1e-9)) top = r; });
+      if (top && rows.filter(function (r) { return r.score[a.key] !== null && Math.abs(r.score[a.key] - top.score[a.key]) < 0.5; }).length === 1) best[a.key] = top.browser;
+      else if (top) best[a.key] = null; // tie: nobody gets the star
+    });
+    return best;
+  }
+
+  function renderWeights() {
+    var presets = document.getElementById('presets');
+    var box = document.getElementById('weights');
+    PRESETS.forEach(function (p) {
+      var btn = el('button', { type: 'button', 'data-preset': p.id, text: p.label });
+      btn.addEventListener('click', function () {
+        weights = Object.assign({}, p.weights);
+        syncWeightInputs();
+        onWeightsChanged();
+      });
+      presets.appendChild(btn);
+    });
+    AXES.forEach(function (a) {
+      var input = el('input', { type: 'range', min: '0', max: '5', step: '1', id: 'w-' + a.key, 'aria-label': 'Poids ' + a.label });
+      var out = el('output', { for: 'w-' + a.key });
+      input.addEventListener('input', function () {
+        weights[a.key] = Number(input.value);
+        out.textContent = input.value;
+        onWeightsChanged();
+      });
+      box.appendChild(el('label', { title: a.help }, [a.label, input, out]));
+    });
+    syncWeightInputs();
+  }
+
+  function syncWeightInputs() {
+    AXES.forEach(function (a) {
+      var input = document.getElementById('w-' + a.key);
+      input.value = String(weights[a.key]);
+      input.nextSibling.textContent = String(weights[a.key]);
+    });
+    PRESETS.forEach(function (p) {
+      var same = AXES.every(function (a) { return p.weights[a.key] === weights[a.key]; });
+      document.querySelector('[data-preset="' + p.id + '"]').setAttribute('aria-pressed', same ? 'true' : 'false');
+    });
+  }
+
+  function onWeightsChanged() {
+    syncWeightInputs();
+    try { localStorage.setItem('bench-weights', JSON.stringify(weights)); } catch (e) { /* ignore */ }
+    renderRanking();
+  }
+
+  function scoreCellStyle(score) {
+    // One-hue sequential scale mixed into the surface; ink flips once the fill gets dark enough.
+    var mix = Math.round(8 + 0.82 * score);
+    return {
+      background: 'color-mix(in srgb, var(--scale-max) ' + mix + '%, var(--surface-1))',
+      color: mix >= 62 ? 'var(--scale-ink-strong)' : 'var(--text-primary)'
+    };
+  }
+
+  function renderRanking() {
+    var ranking = computeRanking();
+    var rows = ranking.rows.filter(function (r) { return r.total !== null; });
+    var best = bestPerAxis(rows);
+    var winnerBox = document.getElementById('winner');
+    winnerBox.replaceChildren();
+
+    if (!rows.length) {
+      winnerBox.appendChild(el('p', { class: 'empty', text: 'Aucune donnée pour cette sélection' }));
+    } else {
+      var w = rows[0];
+      var others = rows.slice(1, 3).map(function (r) { return r.browser + ' (' + fmt(r.total, 0) + ')'; });
+      var runs = ranking.cells.reduce(function (s, c) { return s + c.runs; }, 0);
+      winnerBox.appendChild(el('div', { class: 'winner-head' }, [
+        el('span', { class: 'winner-name' }, [swatch(w.browser), w.browser]),
+        el('span', { class: 'winner-score' }, [fmt(w.total, 0), el('small', { text: ' / 100' })])
+      ]));
+      winnerBox.appendChild(el('p', { class: 'winner-sub', text: (others.length ? 'devant ' + others.join(' et ') + ' · ' : '') + ranking.targets.length + ' cibles, ' + runs + ' runs' }));
+      var list = el('ul', { class: 'axis-winners' });
+      AXES.forEach(function (a) {
+        if (!weights[a.key]) return;
+        var who = best[a.key];
+        var row = who ? rows.find(function (r) { return r.browser === who; }) : null;
+        list.appendChild(el('li', {}, [
+          el('span', { class: 'axis', text: a.label }),
+          who ? el('span', { class: 'name' }, [swatch(who), who]) : el('span', { class: 'muted', text: 'égalité' }),
+          row ? el('span', { class: 'muted', text: a.raw(row.raw[a.key]) }) : null
+        ]));
+      });
+      winnerBox.appendChild(list);
+    }
+
+    var table = document.getElementById('ranking-table');
+    table.replaceChildren();
+    var head = [el('th', { text: '#' }), el('th', { text: 'Navigateur' }), el('th', { text: 'Score global' })]
+      .concat(AXES.map(function (a) {
+        return el('th', { class: 'axis', title: a.help + (weights[a.key] ? '' : ' (poids 0 : hors score global)'), text: a.label + (weights[a.key] ? ' ×' + weights[a.key] : '') });
+      }));
+    table.appendChild(el('thead', {}, [el('tr', {}, head)]));
+    var body = el('tbody');
+    ranking.rows.forEach(function (r, i) {
+      var cells = [
+        el('td', { class: 'rank', text: r.total === null ? '—' : String(i + 1) }),
+        el('td', {}, [browserLabel(r.browser, versionOf(r.browser))]),
+        el('td', {}, [r.total === null ? el('span', { class: 'muted', text: '—' }) : (function () {
+          var bar = el('span', { class: 'bar' }, [el('span')]);
+          bar.firstChild.style.width = Math.max(0, Math.min(100, r.total)) + '%';
+          return el('span', { class: 'global' }, [el('b', { text: fmt(r.total, 0) }), bar]);
+        })()])
+      ];
+      AXES.forEach(function (a) {
+        var s = r.score[a.key];
+        if (s === null) {
+          cells.push(el('td', { class: 'score muted', title: a.label + ' : pas de donnée', text: 'n/d' }));
+          return;
+        }
+        var td = el('td', {
+          class: 'score' + (best[a.key] === r.browser ? ' best' : ''),
+          title: a.label + ' : ' + fmt(s, 0) + '/100 — ' + a.help + ', ' + a.raw(r.raw[a.key]) + ' en moyenne sur ' + r.targets[a.key] + ' cible(s)'
+        }, [el('span', { class: 'v', text: fmt(s, 0) }), el('span', { class: 'raw', text: a.raw(r.raw[a.key]) })]);
+        var style = scoreCellStyle(s);
+        td.style.background = style.background;
+        td.style.color = style.color;
+        if (!weights[a.key]) td.style.opacity = '0.45';
+        cells.push(td);
+      });
+      body.appendChild(el('tr', { class: i === 0 && r.total !== null ? 'first' : '' }, cells));
+    });
+    if (!ranking.rows.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(3 + AXES.length), text: 'Aucune donnée pour cette sélection' })]));
+    table.appendChild(body);
+
+    var notes = [];
+    if (ranking.rows.some(function (r) { return r.browser === 'lightpanda'; })) {
+      notes.push('Lightpanda n’a pas de moteur de rendu : il ne télécharge ni images ni CSS, ce qui l’avantage en vitesse et en mémoire sur les pages riches en médias.');
+    }
+    if (data.memoryMetrics.length > 1) notes.push('Mémoire : private working set (Windows) et USS (WSL), deux mesures de la mémoire propre au navigateur.');
+    notes.push('★ = meilleur sur l’axe (pas d’étoile en cas d’égalité). Un axe à poids 0 est grisé et ne compte pas dans le score global.');
+    document.getElementById('ranking-notes').textContent = notes.join(' ');
+  }
+
+  // ---------- views ----------
+  var activeView = 'ranking';
+  try { if (localStorage.getItem('bench-view') === 'details') activeView = 'details'; } catch (e) { /* ignore */ }
+
+  function showView(view) {
+    activeView = view;
+    ['ranking', 'details'].forEach(function (v) {
+      document.getElementById('tab-' + v).setAttribute('aria-selected', v === view ? 'true' : 'false');
+      document.getElementById('view-' + v).hidden = v !== view;
+    });
+    try { localStorage.setItem('bench-view', view); } catch (e) { /* ignore */ }
+    update();
+  }
+  ['ranking', 'details'].forEach(function (v) {
+    document.getElementById('tab-' + v).addEventListener('click', function () { showView(v); });
+  });
+
   function update() {
+    // Charts are only built while visible: Chart.js cannot size a canvas inside a hidden panel.
+    if (activeView === 'ranking') {
+      renderRanking();
+      return;
+    }
     renderSummary();
     renderAntiBot();
     renderLoadChart();
@@ -573,7 +1058,8 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
   renderMeta();
   renderFilters();
-  update();
+  renderWeights();
+  showView(activeView);
   // Charts read colors from CSS tokens, so they are rebuilt when the color scheme flips.
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', update);
 })();

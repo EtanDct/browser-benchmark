@@ -1,52 +1,120 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { createInterface } from 'node:readline';
+import { promisify } from 'node:util';
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer';
 import { findOnPath, getFreePort, waitForPort } from '../util/proc.js';
-import type { AdapterDefinition, BrowserAdapter, LaunchResult, NavigateOptions, NavigationResult } from './base.js';
+import { withTimeout } from '../util/time.js';
+import { findWslBinary, wslAvailable, wslDistroArgs, wslHostIp, wslKill, wslShell } from '../util/wsl.js';
+import type { AdapterDefinition, Availability, BrowserAdapter, LaunchResult, NavigateOptions, NavigationResult } from './base.js';
 import { navigatePuppeteerPage } from './puppeteer.js';
 
 /**
- * Lightpanda exposes a CDP server (`lightpanda serve`), so it is driven through puppeteer.connect().
- * There is no native Windows build: either put the Linux/macOS binary on PATH / LIGHTPANDA_BIN,
- * or point LIGHTPANDA_WS_ENDPOINT at an instance running in Docker/WSL (RAM/CPU are then not measured).
+ * Lightpanda exposes a CDP server (`lightpanda serve`), driven here through puppeteer.connect().
+ * Three ways to run it, picked in this order:
+ *  - LIGHTPANDA_WS_ENDPOINT: an instance we do not own (Docker...). RAM/CPU are not measured.
+ *  - Windows: the Linux build runs inside WSL2 (no native Windows build). Its CDP port is reached
+ *    through WSL localhost forwarding and its RAM/CPU are sampled from inside WSL.
+ *  - Linux/macOS: the native binary (LIGHTPANDA_BIN or `lightpanda` on PATH).
  */
-function resolveBinary(): string | null {
-  return process.env.LIGHTPANDA_BIN || findOnPath('lightpanda');
+const execFileAsync = promisify(execFile);
+
+type Mode =
+  | { kind: 'external'; endpoint: string }
+  | { kind: 'wsl'; binary: string; hostIp: string }
+  | { kind: 'native'; binary: string };
+
+let resolvedMode: Promise<Mode | { kind: 'missing'; reason: string }> | undefined;
+
+function resolveMode(): Promise<Mode | { kind: 'missing'; reason: string }> {
+  resolvedMode ??= (async () => {
+    if (process.env.LIGHTPANDA_WS_ENDPOINT) return { kind: 'external', endpoint: process.env.LIGHTPANDA_WS_ENDPOINT };
+    if (process.platform === 'win32') {
+      if (!(await wslAvailable())) {
+        return { kind: 'missing', reason: 'no native Windows build and WSL is not available (or set LIGHTPANDA_WS_ENDPOINT)' };
+      }
+      const binary = await findWslBinary('lightpanda', process.env.LIGHTPANDA_WSL_BIN);
+      if (!binary) {
+        return { kind: 'missing', reason: 'not found in WSL: install the Linux build to ~/.local/bin/lightpanda (see README)' };
+      }
+      const hostIp = await wslHostIp();
+      if (!hostIp) return { kind: 'missing', reason: 'could not determine the Windows host address from WSL' };
+      return { kind: 'wsl', binary, hostIp };
+    }
+    const binary = process.env.LIGHTPANDA_BIN || findOnPath('lightpanda');
+    if (binary) return { kind: 'native', binary };
+    return { kind: 'missing', reason: 'install it from https://github.com/lightpanda-io/browser/releases and put it on PATH or set LIGHTPANDA_BIN' };
+  })();
+  return resolvedMode;
+}
+
+/** `sh -c 'echo PID:$$; exec lightpanda ...'` prints the Linux PID before becoming Lightpanda. */
+function readWslPid(child: ChildProcess): Promise<number> {
+  return withTimeout(new Promise<number>((resolve, reject) => {
+    const lines = createInterface({ input: child.stdout! });
+    lines.once('line', (line) => {
+      const pid = Number(/^PID:(\d+)$/.exec(line.trim())?.[1]);
+      if (pid) resolve(pid);
+      else reject(new Error(`unexpected Lightpanda output: ${line}`));
+      // Keep draining so a chatty process never blocks on a full pipe.
+      child.stdout!.resume();
+    });
+    child.once('exit', (code) => reject(new Error(`Lightpanda exited early (code ${code})`)));
+  }), 30_000, 'Lightpanda start in WSL');
 }
 
 class LightpandaAdapter implements BrowserAdapter {
   name = 'lightpanda';
   private server?: ChildProcess;
+  private wslPid?: number;
   private browser?: Browser;
   private context?: BrowserContext;
   private page?: Page;
+  private mode?: Mode;
 
   async launch(): Promise<LaunchResult> {
-    let endpoint = process.env.LIGHTPANDA_WS_ENDPOINT;
-    let pid: number | null = null;
+    const mode = await resolveMode();
+    if (mode.kind === 'missing') throw new Error(`Lightpanda unavailable: ${mode.reason}`);
+    this.mode = mode;
 
-    if (!endpoint) {
-      const binary = resolveBinary();
-      if (!binary) throw new Error('Lightpanda binary not found (set LIGHTPANDA_BIN or LIGHTPANDA_WS_ENDPOINT)');
+    let endpoint: string;
+    let result: LaunchResult;
+    if (mode.kind === 'external') {
+      endpoint = mode.endpoint;
+      result = { pid: null };
+    } else {
       const port = await getFreePort();
-      const server = spawn(binary, ['serve', '--host', '127.0.0.1', '--port', String(port)], {
-        env: { ...process.env, LIGHTPANDA_DISABLE_TELEMETRY: 'true' },
-        stdio: 'ignore',
-      });
+      const serve = `serve --host 127.0.0.1 --port ${port}`;
+      const server = mode.kind === 'wsl'
+        ? spawn('wsl.exe', [...wslDistroArgs(), '-e', 'sh', '-c', `echo PID:$$; LIGHTPANDA_DISABLE_TELEMETRY=true exec ${mode.binary} ${serve}`], {
+            stdio: ['ignore', 'pipe', 'ignore'],
+            windowsHide: true,
+          })
+        : spawn(mode.binary, serve.split(' '), { env: { ...process.env, LIGHTPANDA_DISABLE_TELEMETRY: 'true' }, stdio: 'ignore' });
       this.server = server;
-      await waitForPort(port, 10_000, () => server.exitCode === null);
+      if (mode.kind === 'wsl') this.wslPid = await readWslPid(server);
+      await waitForPort(port, 30_000, () => server.exitCode === null);
       endpoint = `ws://127.0.0.1:${port}`;
-      pid = server.pid ?? null;
+      result = mode.kind === 'wsl' ? { pid: this.wslPid!, location: 'wsl' } : { pid: server.pid ?? null };
     }
 
     this.browser = await puppeteer.connect({ browserWSEndpoint: endpoint });
     this.context = await this.browser.createBrowserContext();
     this.page = await this.context.newPage();
-    return { pid };
+    return result;
   }
 
   navigate(url: string, options: NavigateOptions): Promise<NavigationResult> {
     if (!this.page) throw new Error('launch() must be called before navigate()');
-    return navigatePuppeteerPage(this.page, url, options);
+    return navigatePuppeteerPage(this.page, this.reachable(url), options);
+  }
+
+  /** From WSL, this machine's loopback is the VM's own: local fixtures are reached via the host address. */
+  private reachable(url: string): string {
+    if (this.mode?.kind !== 'wsl') return url;
+    const parsed = new URL(url);
+    if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost') return url;
+    parsed.hostname = this.mode.hostIp;
+    return parsed.toString();
   }
 
   async close(): Promise<void> {
@@ -55,27 +123,40 @@ class LightpandaAdapter implements BrowserAdapter {
       await this.context?.close();
       await this.browser?.disconnect();
     } finally {
+      if (this.wslPid) await wslKill(this.wslPid);
       this.server?.kill();
     }
   }
 
+  /** Over CDP Lightpanda impersonates a Chrome version; the binary reports its real one. */
   async version(): Promise<string> {
-    return this.browser ? this.browser.version() : 'unknown';
+    const mode = this.mode;
+    if (!mode || mode.kind === 'external') return this.browser ? this.browser.version() : 'unknown';
+    realVersion ??= (mode.kind === 'wsl'
+      ? wslShell(`${mode.binary} version`)
+      : execFileAsync(mode.binary, ['version']).then(({ stdout }) => stdout.trim())
+    ).then((v) => `Lightpanda ${v}`, () => 'unknown');
+    return realVersion;
   }
 }
+
+let realVersion: Promise<string> | undefined;
 
 export const lightpandaDefinition: AdapterDefinition = {
   name: 'lightpanda',
   description: 'Lightpanda (Zig, no rendering engine) driven by Puppeteer over its CDP server',
   create: () => new LightpandaAdapter(),
-  async checkAvailability() {
-    if (process.env.LIGHTPANDA_WS_ENDPOINT) {
-      return { available: true, reason: `external endpoint ${process.env.LIGHTPANDA_WS_ENDPOINT}: RAM/CPU not measured` };
+  async checkAvailability(): Promise<Availability> {
+    const mode = await resolveMode();
+    switch (mode.kind) {
+      case 'missing':
+        return { available: false, reason: `Lightpanda not found (${mode.reason})` };
+      case 'external':
+        return { available: true, reason: `external endpoint ${mode.endpoint}: RAM/CPU not measured` };
+      case 'wsl':
+        return { available: true, reason: `runs in WSL (${mode.binary})`, wslHostIp: mode.hostIp };
+      case 'native':
+        return { available: true };
     }
-    if (resolveBinary()) return { available: true };
-    const hint = process.platform === 'win32'
-      ? 'no native Windows build: run it in Docker/WSL and set LIGHTPANDA_WS_ENDPOINT=ws://127.0.0.1:9222'
-      : 'install it from https://github.com/lightpanda-io/browser/releases and put it on PATH or set LIGHTPANDA_BIN';
-    return { available: false, reason: `Lightpanda not found (${hint})` };
   },
 };

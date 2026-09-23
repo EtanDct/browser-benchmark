@@ -3,6 +3,8 @@ dist/
 results/raw/*.json
 results/aggregated.json
 dashboard/index.html
+dashboard/artifact.html
 config/targets.local.json
+.env
 *.log
 .DS_Store

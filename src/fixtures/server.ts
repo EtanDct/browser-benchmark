@@ -120,11 +120,15 @@ export interface FixtureServer {
   close(): Promise<void>;
 }
 
-export async function startFixtureServer(): Promise<FixtureServer> {
+/**
+ * Always listens on 127.0.0.1; `extraHosts` adds listeners on the same port for browsers that
+ * cannot see this machine's loopback (WSL2 reaches Windows through its gateway address).
+ */
+export async function startFixtureServer(extraHosts: string[] = []): Promise<FixtureServer> {
   const pngCache = new Map<string, Buffer>();
   const jsCache = new Map<number, string>();
 
-  const server = http.createServer((req, res) => {
+  const handler: http.RequestListener = (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const send = (status: number, type: string, body: string | Buffer) => {
       res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
@@ -156,16 +160,29 @@ export async function startFixtureServer(): Promise<FixtureServer> {
     const render = PAGES[url.pathname.slice(1)];
     if (render) return send(200, 'text/html; charset=utf-8', render(url.searchParams));
     send(404, 'text/plain', 'not found');
-  });
+  };
 
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as AddressInfo;
+  const listen = (server: http.Server, port: number, host: string) =>
+    new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, host, resolve);
+    });
+
+  const servers = [http.createServer(handler)];
+  await listen(servers[0], 0, '127.0.0.1');
+  const { port } = servers[0].address() as AddressInfo;
+  for (const host of new Set(extraHosts)) {
+    const server = http.createServer(handler);
+    await listen(server, port, host);
+    servers.push(server);
+  }
 
   return {
     resolve: (targetUrl) => targetUrl.replace(/^local:\/\//, `http://127.0.0.1:${port}/`),
-    close: () => new Promise((resolve) => {
-      server.closeAllConnections();
-      server.close(() => resolve());
-    }),
+    close: () =>
+      Promise.all(servers.map((server) => new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }))).then(() => undefined),
   };
 }

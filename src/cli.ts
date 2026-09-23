@@ -1,4 +1,7 @@
+import './env.js';
+import { spawnSync } from 'node:child_process';
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { ADAPTERS, resolveAdapters } from './adapters/registry.js';
@@ -13,6 +16,7 @@ const HELP = `Usage:
   npm run aggregate                 rebuild results/aggregated.json from results/raw
   npm run dashboard                 rebuild dashboard/index.html from results/aggregated.json
   npm run list                      list browsers (with availability) and targets
+  npm run install-browsers          install Playwright's Chromium, Firefox and WebKit (honours PLAYWRIGHT_BROWSERS_PATH / .env)
 
 Bench options:
   --browsers=<list>     comma-separated adapter names, aliases (playwright, selenium) or "all"   [all]
@@ -80,6 +84,14 @@ async function main(): Promise<void> {
     for (const target of loadTargets(values.config)) {
       console.log(`${target.group.padEnd(13)}${target.name.padEnd(20)}${target.url}`);
     }
+    return;
+  }
+
+  if (command === 'install-browsers') {
+    const playwrightCli = path.join(path.dirname(createRequire(import.meta.url).resolve('playwright/package.json')), 'cli.js');
+    console.log(`Installing into ${process.env.PLAYWRIGHT_BROWSERS_PATH ?? "Playwright's default location"}`);
+    const { status } = spawnSync(process.execPath, [playwrightCli, 'install', 'chromium', 'firefox', 'webkit'], { stdio: 'inherit' });
+    process.exitCode = status ?? 1;
     return;
   }
 

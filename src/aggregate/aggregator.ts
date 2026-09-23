@@ -32,13 +32,21 @@ export interface Cell {
   successes: number;
   successRate: number;
   timeouts: number;
+  memoryMetric: MemoryMetric | null;
   loadTimeMs: Stats | null;
   launchTimeMs: Stats | null;
   memAvgMB: Stats | null;
   memPeakMB: Stats | null;
   cpuAvgPercent: Stats | null;
   cpuPeakPercent: Stats | null;
-  antiBot: { evaluated: number; passed: number; passRate: number; outcomes: Partial<Record<AntiBotOutcome, number>> } | null;
+  antiBot: {
+    evaluated: number;
+    passed: number;
+    passRate: number;
+    /** Mean graded stealth score (0-1); runs that never got a page count as 0. */
+    meanScore: number;
+    outcomes: Partial<Record<AntiBotOutcome, number>>;
+  } | null;
   fidelity: {
     /** Share of this browser's successful runs whose DOM structure hash equals the cross-browser consensus. */
     matchRate: number;
@@ -68,10 +76,17 @@ export interface AggregatedReport {
   schemaVersion: 1;
   generatedAt: string;
   runCount: number;
-  memoryMetric: MemoryMetric | null;
+  /** Distinct memory metrics in the report (Windows browsers vs browsers hosted in WSL...). */
+  memoryMetrics: MemoryMetric[];
   environment: EnvironmentInfo | null;
   browsers: string[];
-  targets: Array<{ name: string; group: string; url: string }>;
+  targets: Array<{
+    name: string;
+    group: string;
+    url: string;
+    /** The page exposes individual checks, so its anti-bot score is graded rather than pass/fail only. */
+    gradedAntiBot: boolean;
+  }>;
   cells: Cell[];
   browserSummaries: BrowserSummary[];
 }
@@ -141,6 +156,8 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
     const outcomes: Partial<Record<AntiBotOutcome, number>> = {};
     for (const r of antiBotRuns) outcomes[r.navigation.antiBot!.outcome] = (outcomes[r.navigation.antiBot!.outcome] ?? 0) + 1;
     const passed = antiBotRuns.filter((r) => r.navigation.antiBot!.passed).length;
+    // Records written before graded scores existed only carry pass/fail.
+    const scoreSum = antiBotRuns.reduce((sum, r) => sum + (r.navigation.antiBot!.score ?? (r.navigation.antiBot!.passed ? 1 : 0)), 0);
     // A run that never got a page counts as a failed anti-bot attempt for antibot targets.
     const antiBotAttempts = runs.some((r) => r.targetGroup === 'antibot') || antiBotRuns.length ? runs.length : 0;
 
@@ -157,6 +174,7 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
       successes: ok.length,
       successRate: ok.length / runs.length,
       timeouts: runs.filter((r) => r.timedOut).length,
+      memoryMetric: runs.find((r) => r.resources)?.resources?.memoryMetric ?? null,
       loadTimeMs: computeStats(ok.map((r) => r.navigation.loadTimeMs)),
       launchTimeMs: computeStats(runs.flatMap((r) => (r.launchTimeMs === undefined ? [] : [r.launchTimeMs]))),
       memAvgMB: computeStats(summaries.flatMap((s) => (s.memBytes ? [s.memBytes.avg / MB] : []))),
@@ -164,7 +182,7 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
       cpuAvgPercent: computeStats(summaries.flatMap((s) => (s.cpuPercent ? [s.cpuPercent.avg] : []))),
       cpuPeakPercent: computeStats(summaries.flatMap((s) => (s.cpuPercent ? [s.cpuPercent.max] : []))),
       antiBot: antiBotAttempts
-        ? { evaluated: antiBotAttempts, passed, passRate: passed / antiBotAttempts, outcomes }
+        ? { evaluated: antiBotAttempts, passed, passRate: passed / antiBotAttempts, meanScore: Math.round((scoreSum / antiBotAttempts) * 1000) / 1000, outcomes }
         : null,
       fidelity: hashed.length && consensus.hash
         ? {
@@ -208,14 +226,18 @@ export function aggregate(records: RunRecord[]): AggregatedReport {
     };
   });
 
-  const targets = [...new Map(cells.map((c) => [c.target, { name: c.target, group: c.group, url: c.url }])).values()];
+  // Pass/fail pages only ever score 0 or 1; any run in between proves the page grades its checks.
+  const gradedTargets = new Set(
+    records.filter((r) => { const s = r.navigation.antiBot?.score; return s !== undefined && s > 0 && s < 1; }).map((r) => r.target),
+  );
+  const targets = [...new Map(cells.map((c) => [c.target, { name: c.target, group: c.group, url: c.url, gradedAntiBot: gradedTargets.has(c.target) }])).values()];
   const latest = [...records].sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
 
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     runCount: records.length,
-    memoryMetric: records.find((r) => r.resources)?.resources?.memoryMetric ?? null,
+    memoryMetrics: [...new Set(cells.flatMap((c) => (c.memoryMetric ? [c.memoryMetric] : [])))],
     environment: latest?.environment ?? null,
     browsers,
     targets,

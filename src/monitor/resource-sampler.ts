@@ -1,6 +1,11 @@
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import pidusage from 'pidusage';
+import type { ProcessLocation } from '../adapters/base.js';
 import { descendantsOf, unixProcessTable } from '../util/proc.js';
-import { WindowsTreeProbe } from './windows-probe.js';
+import { toWslPath, wslDistroArgs } from '../util/wsl.js';
+import { LineProtocolProbe } from './line-probe.js';
+import { createWindowsProbe } from './windows-probe.js';
 
 export interface RawSample {
   epochMs: number;
@@ -18,7 +23,8 @@ export interface ResourceSample {
   processCount: number;
 }
 
-export type MemoryMetric = 'private-working-set' | 'rss';
+/** private-working-set (Windows) and uss (Linux in WSL) both exclude shared pages; rss does not. */
+export type MemoryMetric = 'private-working-set' | 'uss' | 'rss';
 
 export interface TreeProbe {
   readonly memoryMetric: MemoryMetric;
@@ -91,6 +97,17 @@ class UnixTreeProbe implements TreeProbe {
   }
 }
 
+/** Browsers hosted in WSL are invisible from Windows (only wsl.exe shows): sample them from inside. */
+async function createWslProbe(intervalMs: number): Promise<TreeProbe> {
+  const script = await toWslPath(fileURLToPath(new URL('./wsl-sampler.py', import.meta.url)));
+  return new LineProtocolProbe('uss', 'WSL', () =>
+    spawn('wsl.exe', [...wslDistroArgs(), '-e', 'python3', script, String(intervalMs)], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    }),
+  );
+}
+
 /**
  * Samples memory/CPU of a browser's whole process tree (Chromium = browser + GPU + renderers...)
  * at a fixed interval. One sampler lives for the whole campaign; begin()/end() delimit each run.
@@ -101,8 +118,11 @@ export class ResourceSampler {
 
   private constructor(private probe: TreeProbe) {}
 
-  static async create(intervalMs: number): Promise<ResourceSampler> {
-    const probe = process.platform === 'win32' ? new WindowsTreeProbe(intervalMs) : new UnixTreeProbe(intervalMs);
+  static async create(intervalMs: number, location: ProcessLocation = 'host'): Promise<ResourceSampler> {
+    let probe: TreeProbe;
+    if (location === 'wsl') probe = await createWslProbe(intervalMs);
+    else if (process.platform === 'win32') probe = createWindowsProbe(intervalMs);
+    else probe = new UnixTreeProbe(intervalMs);
     await probe.start();
     return new ResourceSampler(probe);
   }
