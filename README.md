@@ -199,7 +199,7 @@ La couleur identifie la **famille de moteur** (par exemple Chromium pour `playwr
 
 ## Débit en parallèle
 
-`npm run throughput` ouvre N pages dans **un seul** navigateur, chaque page dans son propre contexte isolé, comme un scraper qui garde ses sessions séparées. Les N pages se partagent une file de chargements : 6 par page ouverte (24 au moins), pour que chaque niveau dure assez longtemps. Pour chaque N, on mesure les pages par minute, les échecs, la mémoire moyenne et au pic et les secondes de CPU par page. La **mémoire par page supplémentaire** est la pente de la mémoire au pic selon N. Par défaut, deux pages : `local-heavy-js` (calcul JS) et `local-spa` (API JSON + DOM, un scraping typique). Résultats : `results/throughput/`, intégrés à l'agrégat et au dashboard.
+`npm run throughput` ouvre N pages dans **un seul** navigateur, chaque page dans son propre contexte isolé, comme un scraper qui garde ses sessions séparées. Les N pages se partagent une file de chargements : 6 par page ouverte (24 au moins), pour que chaque niveau dure assez longtemps. Pour chaque N, on mesure les pages par minute, les échecs, la mémoire moyenne et au pic et les secondes de CPU par page. La **mémoire par page supplémentaire** est la pente de la mémoire au pic selon N. Un navigateur qui échoue sur plus de la moitié des chargements d'un palier ne passe pas aux paliers suivants : chaque chargement bloqué attend son timeout complet, et ce serait des minutes à confirmer un échec. Par défaut, deux pages : `local-heavy-js` (calcul JS) et `local-spa` (API JSON + DOM, un scraping typique). Résultats : `results/throughput/`, intégrés à l'agrégat et au dashboard.
 
 ## Historique et campagne planifiée
 

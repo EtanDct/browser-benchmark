@@ -27,6 +27,8 @@ export interface ThroughputRecord {
   startedAt: string;
   memoryMetric: MemoryMetric | null;
   levels: ThroughputLevel[];
+  /** Concurrency after which higher levels were skipped because most loads failed. */
+  stoppedAfter?: number;
   error?: string;
   environment: EnvironmentInfo;
 }

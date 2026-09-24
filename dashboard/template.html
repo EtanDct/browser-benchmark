@@ -1323,7 +1323,8 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     tests.slice().sort(function (a, b) { return (b.bestPagesPerMinute || 0) - (a.bestPagesPerMinute || 0); }).forEach(function (t) {
       var failures = t.levels.reduce(function (s, l) { return s + (l.pages - l.successes); }, 0);
       var failedLevels = t.levels.filter(function (l) { return l.errors && l.errors.length; });
-      var problem = t.error || (failedLevels.length ? 'dès ' + failedLevels[0].concurrency + ' page(s) en parallèle : ' + failedLevels[0].errors[0] : '');
+      var problem = t.error || (failedLevels.length ? 'dès ' + failedLevels[0].concurrency + ' page(s) en parallèle : ' + failedLevels[0].errors[0] : '')
+        + (t.stoppedAfter ? ' (paliers suivants non testés : la plupart des chargements échouaient)' : '');
       body.appendChild(el('tr', {}, [
         el('td', {}, [browserLabel(t.browser, t.browserVersion)]),
         el('td', { class: 'left', text: t.target }),

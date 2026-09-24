@@ -124,6 +124,13 @@ export async function runThroughput(options: ThroughputOptions): Promise<Through
             record.levels.push(level);
             log(`[${definition.name}] ${target.name} x${concurrency}  ${level.pagesPerMinute} pages/min  ${successes}/${level.pages} ok` +
               (level.memPeakMB !== null ? `  mem peak ${level.memPeakMB}MB` : '') + (errors.size ? `  (${[...errors][0]})` : ''));
+            // A browser that fails most loads at this level only does worse with more pages, and every
+            // stuck load waits for its full timeout: stop here rather than spend minutes confirming it.
+            if (successes < pageCount / 2) {
+              record.stoppedAfter = concurrency;
+              log(`[${definition.name}] ${target.name} stopped: most loads failed at x${concurrency}`);
+              break;
+            }
           }
         } catch (err) {
           record.error = errorMessage(err);
