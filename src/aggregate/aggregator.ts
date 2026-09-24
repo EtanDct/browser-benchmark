@@ -1,7 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { Engine } from '../adapters/base.js';
 import type { AntiBotOutcome } from '../antibot/evaluators.js';
-import type { MemoryMetric } from '../monitor/resource-sampler.js';
+import { cpuSecondsOf, type MemoryMetric } from '../monitor/resource-sampler.js';
 import type { ThroughputLevel, ThroughputRecord } from '../runner/throughput-types.js';
 import type { EnvironmentInfo, RunMode, RunRecord } from '../runner/types.js';
 import type { VisualScore } from './visual.js';
@@ -28,11 +29,16 @@ export interface RunSeries {
   loadTimeMs: number;
   launchMs: number | null;
   memAvgMB: number | null;
+  memPeakMB: number | null;
   cpuAvg: number | null;
+  /** CPU time the browser tree consumed during the run, in seconds. */
+  cpuSec: number | null;
   /** Graded anti-bot score; 0 when the page never delivered a verdict; null outside anti-bot targets. */
   abScore: number | null;
-  /** Similarity of this run's DOM to the cross-browser consensus (0-1). */
+  /** Similarity of this run's DOM to the cross-engine consensus (0-1); null on anti-bot pages. */
   domSimilarity: number | null;
+  /** Share of the content the page declares it should end up with (local fixtures), 0-1. */
+  contentScore: number | null;
   bytesDownMB: number | null;
   /** [t ms, memory MB, cpu % | null] */
   samples: Array<[number, number, number | null]>;
@@ -41,6 +47,7 @@ export interface RunSeries {
 export interface Cell {
   browser: string;
   adapter: string;
+  engine: Engine | null;
   mode: RunMode;
   stealth: boolean;
   browserVersion?: string;
@@ -58,6 +65,8 @@ export interface Cell {
   memPeakMB: Stats | null;
   cpuAvgPercent: Stats | null;
   cpuPeakPercent: Stats | null;
+  /** CPU seconds per run: unlike the average %, independent of how long the run stayed open. */
+  cpuSeconds: Stats | null;
   /** Downloaded MB per navigation, through the counting proxy (remote targets). */
   networkMB: Stats | null;
   antiBot: {
@@ -68,8 +77,11 @@ export interface Cell {
     meanScore: number;
     outcomes: Partial<Record<AntiBotOutcome, number>>;
   } | null;
+  /** Expected content declared by the page (local fixtures): mean score and the median count found per selector. */
+  content: { score: number; checks: Array<{ selector: string; expected: number; foundMedian: number }> } | null;
+  /** Null on anti-bot pages: a browser that gets past a challenge sees another page than the others. */
   fidelity: {
-    /** Mean similarity of the DOM (tag counts, weighted Jaccard) to the cross-browser consensus. */
+    /** Mean similarity of the DOM (tag counts, weighted Jaccard) to the cross-engine consensus. */
     similarity: number;
     /** Share of runs whose exact DOM structure hash equals the consensus hash. */
     matchRate: number;
@@ -96,7 +108,9 @@ export interface BrowserSummary {
   memAvgMB: number | null;
   memPeakMB: number | null;
   cpuAvgPercent: number | null;
+  cpuSeconds: number | null;
   fidelitySimilarity: number | null;
+  contentScore: number | null;
   networkMB: number | null;
 }
 
@@ -118,6 +132,8 @@ export interface AggregatedReport {
     name: string;
     group: string;
     url: string;
+    /** Anti-bot page: counted for detection only, left out of performance and fidelity figures. */
+    antiBot: boolean;
     /** The page exposes individual checks, so its anti-bot score is graded rather than pass/fail only. */
     gradedAntiBot: boolean;
     /** Browser whose screenshot the others are compared to, when screenshots exist. */
@@ -138,9 +154,11 @@ const T95: Array<[number, number]> = [
   [10, 2.228], [12, 2.179], [15, 2.131], [20, 2.086], [25, 2.06], [30, 2.042], [40, 2.021], [60, 2.0], [120, 1.98],
 ];
 
-/** Rounds df up to the next tabulated value: slightly conservative between table rows. */
-function tCritical(df: number): number {
-  return T95.find(([d]) => df <= d)?.[1] ?? 1.96;
+/** Between table rows, uses the next smaller tabulated df: a larger t, so a slightly wider (conservative) interval. */
+export function tCritical(df: number): number {
+  let t = T95[0][1];
+  for (const [d, value] of T95) if (d <= df) t = value;
+  return t;
 }
 
 export function computeStats(values: number[]): Stats | null {
@@ -198,20 +216,69 @@ export function tagSimilarity(a: Record<string, number>, b: Record<string, numbe
   return union ? intersection / union : 1;
 }
 
-/** Per-tag median over every browser's runs: the DOM a "typical" browser builds for this page. */
-function consensusTagCounts(runs: RunRecord[]): Record<string, number> | null {
-  const withCounts = runs.map((r) => r.navigation.domTagCounts).filter((c): c is Record<string, number> => !!c);
-  if (!withCounts.length) return null;
-  const consensus: Record<string, number> = {};
-  for (const tag of new Set(withCounts.flatMap((c) => Object.keys(c)))) {
-    const value = median(withCounts.map((c) => c[tag] ?? 0));
-    if (value > 0) consensus[tag] = value;
+/** Engine of records written before RunRecord.engine existed. */
+const ENGINE_OF: Record<string, Engine> = {
+  puppeteer: 'chromium',
+  'puppeteer-stealth': 'chromium',
+  patchright: 'chromium',
+  'playwright-chromium': 'chromium',
+  'selenium-chrome': 'chromium',
+  'playwright-firefox': 'gecko',
+  camoufox: 'gecko',
+  'playwright-webkit': 'webkit',
+  lightpanda: 'lightpanda',
+};
+
+export function engineOf(r: Pick<RunRecord, 'engine' | 'adapter' | 'browser'>): Engine | null {
+  return r.engine ?? ENGINE_OF[r.adapter ?? r.browser.replace(/\+lite$/, '')] ?? null;
+}
+
+function perTagMedian(counts: Array<Record<string, number>>): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const tag of new Set(counts.flatMap((c) => Object.keys(c)))) {
+    const value = median(counts.map((c) => c[tag] ?? 0));
+    if (value > 0) result[tag] = value;
   }
-  return consensus;
+  return result;
+}
+
+/**
+ * The DOM "the engines agree on": per-tag median within each engine, then across engines, full mode
+ * only. One vote per engine: five Chromium drivers and their lite variants would otherwise make the
+ * consensus Chromium's DOM, and blocking CSS/images can change what scripts build.
+ */
+export function consensusTagCounts(runs: RunRecord[]): Record<string, number> | null {
+  const byEngine = new Map<string, Array<Record<string, number>>>();
+  for (const r of runs) {
+    if (!r.navigation.domTagCounts || (r.mode ?? 'full') !== 'full') continue;
+    const engine = engineOf(r) ?? r.browser;
+    byEngine.set(engine, [...(byEngine.get(engine) ?? []), r.navigation.domTagCounts]);
+  }
+  if (!byEngine.size) return null;
+  return perTagMedian([...byEngine.values()].map(perTagMedian));
 }
 
 function isAntiBotRun(r: RunRecord): boolean {
   return r.targetGroup === 'antibot' || !!r.navigation.antiBot;
+}
+
+/** CPU seconds of a run; computed from its samples for records written before the summary had it. */
+function runCpuSeconds(r: RunRecord): number | null {
+  const summary = r.resources?.summary;
+  if (!summary) return null;
+  if (summary.cpuSeconds !== undefined) return summary.cpuSeconds;
+  return cpuSecondsOf(r.resources!.samples);
+}
+
+/** Records of one campaign; records written before campaign ids existed form the "legacy" campaign. */
+export function campaignOf(r: RunRecord): string {
+  return r.campaign ?? 'legacy';
+}
+
+/** Campaign of the most recently started run. */
+export function latestCampaign(records: RunRecord[]): string | null {
+  const latest = records.reduce<RunRecord | null>((a, r) => (!a || r.startedAt > a.startedAt ? r : a), null);
+  return latest ? campaignOf(latest) : null;
 }
 
 function summarizeThroughput(record: ThroughputRecord): ThroughputSummary {
@@ -239,10 +306,12 @@ export interface AggregateInputs {
 
 export function aggregate(records: RunRecord[], inputs: AggregateInputs = {}): AggregatedReport {
   const successful = records.filter((r) => r.navigation.success);
+  const antiBotTargets = new Set(records.filter(isAntiBotRun).map((r) => r.target));
 
   const consensusByTarget = new Map<string, { hash?: string; elementCount: number; tags: Record<string, number> | null }>();
   for (const target of new Set(records.map((r) => r.target))) {
-    const runs = successful.filter((r) => r.target === target && r.navigation.domSnapshotHash);
+    if (antiBotTargets.has(target)) continue;
+    const runs = successful.filter((r) => r.target === target && r.navigation.domSnapshotHash && (r.mode ?? 'full') === 'full');
     consensusByTarget.set(target, {
       hash: mostFrequent(runs.map((r) => r.navigation.domSnapshotHash!)),
       elementCount: median(runs.map((r) => r.navigation.domStats?.elementCount ?? 0)),
@@ -251,7 +320,7 @@ export function aggregate(records: RunRecord[], inputs: AggregateInputs = {}): A
   }
 
   const similarityOf = (r: RunRecord): number | null => {
-    if (!r.navigation.success) return null;
+    if (!r.navigation.success || antiBotTargets.has(r.target)) return null;
     const consensus = consensusByTarget.get(r.target);
     if (consensus?.tags && r.navigation.domTagCounts) return tagSimilarity(r.navigation.domTagCounts, consensus.tags);
     // Records written before tag counts existed: exact structure match or not.
@@ -282,12 +351,14 @@ export function aggregate(records: RunRecord[], inputs: AggregateInputs = {}): A
     const antiBotAttempts = runs.some(isAntiBotRun) ? runs.length : 0;
 
     const hashed = ok.filter((r) => r.navigation.domSnapshotHash);
-    const consensus = consensusByTarget.get(ref.target)!;
+    const consensus = consensusByTarget.get(ref.target);
     const similarities = ok.map(similarityOf).filter((s): s is number => s !== null);
+    const contents = ok.flatMap((r) => (r.navigation.content ? [r.navigation.content] : []));
 
     return {
       browser: ref.browser,
       adapter: ref.adapter ?? ref.browser,
+      engine: engineOf(ref),
       mode: ref.mode ?? 'full',
       stealth: !!ref.stealth,
       browserVersion: runs.map((r) => r.browserVersion).find((v) => v && v !== 'unknown'),
@@ -305,11 +376,22 @@ export function aggregate(records: RunRecord[], inputs: AggregateInputs = {}): A
       memPeakMB: computeStats(summaries.flatMap((s) => (s.memBytes ? [s.memBytes.max / MB] : []))),
       cpuAvgPercent: computeStats(summaries.flatMap((s) => (s.cpuPercent ? [s.cpuPercent.avg] : []))),
       cpuPeakPercent: computeStats(summaries.flatMap((s) => (s.cpuPercent ? [s.cpuPercent.max] : []))),
+      cpuSeconds: computeStats(runs.flatMap((r) => { const s = runCpuSeconds(r); return s === null ? [] : [s]; })),
       networkMB: computeStats(ok.flatMap((r) => (r.network ? [r.network.bytesDown / MB] : []))),
       antiBot: antiBotAttempts
         ? { evaluated: antiBotAttempts, passed, passRate: passed / antiBotAttempts, meanScore: Math.round((scoreSum / antiBotAttempts) * 1000) / 1000, outcomes }
         : null,
-      fidelity: similarities.length
+      content: contents.length
+        ? {
+            score: Math.round((contents.reduce((sum, c) => sum + c.score, 0) / contents.length) * 1000) / 1000,
+            checks: contents[0].checks.map((check, i) => ({
+              selector: check.selector,
+              expected: check.expected,
+              foundMedian: median(contents.map((c) => c.checks[i]?.found ?? 0)),
+            })),
+          }
+        : null,
+      fidelity: similarities.length && consensus
         ? {
             similarity: Math.round((similarities.reduce((a, b) => a + b, 0) / similarities.length) * 1000) / 1000,
             matchRate: hashed.length ? hashed.filter((r) => r.navigation.domSnapshotHash === consensus.hash).length / hashed.length : 0,
@@ -328,9 +410,12 @@ export function aggregate(records: RunRecord[], inputs: AggregateInputs = {}): A
           loadTimeMs: r.navigation.loadTimeMs,
           launchMs: r.launchTimeMs ?? null,
           memAvgMB: summary?.memBytes ? round2(summary.memBytes.avg / MB) : null,
+          memPeakMB: summary?.memBytes ? round2(summary.memBytes.max / MB) : null,
           cpuAvg: summary?.cpuPercent ? round2(summary.cpuPercent.avg) : null,
+          cpuSec: runCpuSeconds(r),
           abScore: isAntiBotRun(r) ? scoreOf(r) : null,
           domSimilarity: similarityOf(r),
+          contentScore: r.navigation.success && r.navigation.content ? r.navigation.content.score : null,
           bytesDownMB: r.network ? round2(r.network.bytesDown / MB) : null,
           samples: downsample(r.resources?.samples ?? [], MAX_SERIES_POINTS).map(
             (s): [number, number, number | null] => [s.t, Math.round((s.memBytes / MB) * 10) / 10, s.cpuPercent === null ? null : Math.round(s.cpuPercent * 10) / 10],
@@ -345,6 +430,8 @@ export function aggregate(records: RunRecord[], inputs: AggregateInputs = {}): A
 
   const browserSummaries: BrowserSummary[] = browsers.map((browser) => {
     const own = cells.filter((c) => c.browser === browser);
+    // Speed, resources and fidelity on anti-bot pages would reward being blocked early.
+    const perf = own.filter((c) => !antiBotTargets.has(c.target));
     const runs = own.reduce((sum, c) => sum + c.runs, 0);
     const antiBot = own.filter((c) => c.antiBot);
     const antiBotEvaluated = antiBot.reduce((sum, c) => sum + c.antiBot!.evaluated, 0);
@@ -356,12 +443,14 @@ export function aggregate(records: RunRecord[], inputs: AggregateInputs = {}): A
       runs,
       successRate: own.reduce((sum, c) => sum + c.successes, 0) / runs,
       antiBotPassRate: antiBotEvaluated ? antiBot.reduce((sum, c) => sum + c.antiBot!.passed, 0) / antiBotEvaluated : null,
-      meanLoadTimeMs: meanOf(own.map((c) => c.loadTimeMs?.median)),
-      memAvgMB: meanOf(own.map((c) => c.memAvgMB?.mean)),
-      memPeakMB: own.reduce<number | null>((max, c) => (c.memPeakMB ? Math.max(max ?? 0, c.memPeakMB.max) : max), null),
-      cpuAvgPercent: meanOf(own.map((c) => c.cpuAvgPercent?.mean)),
-      fidelitySimilarity: meanOf(own.map((c) => c.fidelity?.similarity)),
-      networkMB: meanOf(own.map((c) => c.networkMB?.mean)),
+      meanLoadTimeMs: meanOf(perf.map((c) => c.loadTimeMs?.median)),
+      memAvgMB: meanOf(perf.map((c) => c.memAvgMB?.mean)),
+      memPeakMB: perf.reduce<number | null>((max, c) => (c.memPeakMB ? Math.max(max ?? 0, c.memPeakMB.max) : max), null),
+      cpuAvgPercent: meanOf(perf.map((c) => c.cpuAvgPercent?.mean)),
+      cpuSeconds: meanOf(perf.map((c) => c.cpuSeconds?.median)),
+      fidelitySimilarity: meanOf(perf.map((c) => c.fidelity?.similarity)),
+      contentScore: meanOf(perf.map((c) => c.content?.score)),
+      networkMB: meanOf(perf.map((c) => c.networkMB?.mean)),
     };
   });
 
@@ -373,6 +462,7 @@ export function aggregate(records: RunRecord[], inputs: AggregateInputs = {}): A
     name: c.target,
     group: c.group,
     url: c.url,
+    antiBot: antiBotTargets.has(c.target),
     gradedAntiBot: gradedTargets.has(c.target),
     visualReference: inputs.visualReferences?.get(c.target) ?? null,
   }])).values()];

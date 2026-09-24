@@ -34,7 +34,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # Chrome for Testing comes with npm ci (every Chromium driver launches it); chromium here only pulls its system deps.
+      - run: npx playwright install --with-deps chromium firefox webkit
       # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor, which Chrome's sandbox needs:
       # Puppeteer cannot launch Chrome otherwise (Playwright disables that sandbox by default).
       - name: Allow Chrome's sandbox on Ubuntu 24.04
@@ -44,21 +45,26 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/lightpanda" https://github.com/lightpanda-io/browser/releases/download/nightly/lightpanda-x86_64-linux
           chmod a+x "$RUNNER_TEMP/lightpanda"
           echo "LIGHTPANDA_BIN=$RUNNER_TEMP/lightpanda" >> "$GITHUB_ENV"
-      - run: npm run bench -- --browsers=puppeteer,playwright-chromium,lightpanda --targets=local --runs=1 --pause=200
-      - name: Check every browser loaded pages and was monitored
+      # Every browser except Camoufox (a 500 MB download), full and lite, on the local pages.
+      - run: npm run bench -- --browsers=vanilla,puppeteer-stealth,patchright --targets=local --runs=1 --modes=full,lite --campaign=ci --pause=200
+      - run: npm run throughput -- --browsers=puppeteer,playwright-firefox,lightpanda --target=local-static --concurrency=1,2 --pages=4
+      - name: Check every browser loaded pages, found their content and was monitored
         run: |
           node -e '
             const r = require("./results/aggregated.json");
             // Lightpanda is a nightly build: report it, but only the stable browsers gate the job.
-            const required = ["puppeteer", "playwright-chromium"];
+            const required = ["puppeteer", "puppeteer-stealth", "patchright", "playwright-chromium", "playwright-firefox", "playwright-webkit", "selenium-chrome"];
             let ok = true;
             for (const s of r.browserSummaries) {
-              console.log(`${s.browser}: success ${s.successRate}, mem ${s.memAvgMB} MB, cpu ${s.cpuAvgPercent} %`);
-              if (required.includes(s.browser) && (s.successRate < 1 || !s.memAvgMB)) ok = false;
+              console.log(`${s.browser}: success ${s.successRate}, content ${s.contentScore}, mem ${s.memAvgMB} MB, cpu ${s.cpuSeconds} s`);
+              if (required.includes(s.browser.replace(/\+lite$/, "")) && (s.successRate < 1 || !s.memAvgMB || s.contentScore < 1)) ok = false;
             }
-            for (const b of required) if (!r.browsers.includes(b)) ok = false;
+            for (const b of required) if (!r.browsers.includes(b) || !r.browsers.includes(b + "+lite")) ok = false;
+            if (!r.throughput.length) ok = false;
             process.exit(ok ? 0 : 1);
           '
+      - name: Check the dashboard renders without script errors
+        run: npm run check-dashboard
       - uses: actions/upload-artifact@v4
         if: always()
         with:

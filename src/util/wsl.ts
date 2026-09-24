@@ -47,6 +47,18 @@ export async function wslHostIp(): Promise<string | null> {
   }
 }
 
+/**
+ * "nat" (default: WSL reaches Windows through its gateway address) or "mirrored" (Windows and WSL
+ * share 127.0.0.1). Older WSL releases have no wslinfo and only support NAT.
+ */
+export async function wslNetworkingMode(): Promise<'nat' | 'mirrored'> {
+  try {
+    return (await wslShell('wslinfo --networking-mode 2>/dev/null || true')).trim().toLowerCase() === 'mirrored' ? 'mirrored' : 'nat';
+  } catch {
+    return 'nat';
+  }
+}
+
 export async function toWslPath(windowsPath: string): Promise<string> {
   const { stdout } = await execFileAsync('wsl.exe', [...wslDistroArgs(), '-e', 'wslpath', '-a', windowsPath], { windowsHide: true });
   return stdout.trim();

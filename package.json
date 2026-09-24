@@ -13,7 +13,8 @@
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "install-browsers": "tsx src/cli.ts install-browsers",
     "dashboard:artifact": "tsx dashboard/generate-dashboard.ts --artifact",
-    "throughput": "tsx src/cli.ts throughput"
+    "throughput": "tsx src/cli.ts throughput",
+    "check-dashboard": "tsx scripts/check-dashboard.ts"
   },
   "engines": {
     "node": ">=22"

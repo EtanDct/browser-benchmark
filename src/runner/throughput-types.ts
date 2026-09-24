@@ -11,6 +11,8 @@ export interface ThroughputLevel {
   memAvgMB: number | null;
   memPeakMB: number | null;
   cpuAvgPercent: number | null;
+  /** CPU time the browser spent per successful page load. */
+  cpuSecondsPerPage?: number | null;
   /** First distinct failure messages at this level. */
   errors?: string[];
 }

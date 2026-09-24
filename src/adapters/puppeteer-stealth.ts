@@ -2,11 +2,13 @@ import puppeteer from 'puppeteer';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { AdapterDefinition } from './base.js';
-import { chromeForTestingAvailability, PuppeteerAdapter, type PuppeteerLauncher } from './puppeteer.js';
+import { benchChromeAvailability } from './chrome.js';
+import { PuppeteerAdapter, type PuppeteerLauncher } from './puppeteer.js';
 
 /**
  * Same Chrome for Testing as `puppeteer`, with puppeteer-extra's stealth plugin: it patches the
  * classic headless leaks (navigator.webdriver, HeadlessChrome user agent, missing plugins, chrome.runtime...).
+ * The plugin has had no release since 2023: it stands for the widely used, dated evasion set.
  */
 let launcher: PuppeteerLauncher | undefined;
 
@@ -23,8 +25,9 @@ function stealthLauncher(): PuppeteerLauncher {
 export const puppeteerStealthDefinition: AdapterDefinition = {
   name: 'puppeteer-stealth',
   description: 'Puppeteer + puppeteer-extra-plugin-stealth (headless leaks patched)',
+  engine: 'chromium',
   create: () => new PuppeteerAdapter('puppeteer-stealth', async () => stealthLauncher()),
-  checkAvailability: chromeForTestingAvailability,
+  checkAvailability: benchChromeAvailability,
   supportsLite: true,
   stealth: true,
 };

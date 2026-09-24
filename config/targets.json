@@ -2,7 +2,8 @@
   "defaults": {
     "timeoutMs": 30000,
     "settleMs": 1000,
-    "challengeWaitMs": 15000
+    "challengeWaitMs": 15000,
+    "runs": 10
   },
   "targets": [
     {
@@ -10,6 +11,7 @@
       "group": "antibot",
       "url": "https://bot.sannysoft.com",
       "description": "Fingerprinting, classic: headless checks from the Intoli/fpscanner era (webdriver flag, plugins, WebGL vendor, permissions...)",
+      "runs": 3,
       "settleMs": 3000,
       "antiBot": { "evaluator": "sannysoft" }
     },
@@ -18,6 +20,7 @@
       "group": "antibot",
       "url": "https://abrahamjuliot.github.io/creepjs/",
       "description": "Fingerprinting, advanced: headless signals plus detection of spoofed/patched APIs (stealth plugins)",
+      "runs": 3,
       "settleMs": 2000,
       "challengeWaitMs": 20000,
       "antiBot": { "evaluator": "creepjs" }
@@ -27,6 +30,7 @@
       "group": "antibot",
       "url": "https://deviceandbrowserinfo.com/are_you_a_bot",
       "description": "Commercial-grade signals (by a DataDome researcher): CDP automation, webdriver, client-hints and worker inconsistencies",
+      "runs": 3,
       "settleMs": 2000,
       "antiBot": { "evaluator": "deviceandbrowserinfo" }
     },
@@ -35,6 +39,7 @@
       "group": "antibot",
       "url": "https://www.browserscan.net/bot-detection",
       "description": "Bot-detection scanner used by antidetect-browser vendors: webdriver, user-agent, CDP and navigator checks",
+      "runs": 3,
       "settleMs": 3000,
       "antiBot": { "evaluator": "generic", "detectedPattern": "Test Results:\\s*Robot", "passedPattern": "Test Results:\\s*Normal" }
     },
@@ -43,6 +48,7 @@
       "group": "antibot",
       "url": "https://www.scrapingcourse.com/cloudflare-challenge",
       "description": "Real Cloudflare managed challenge on a sandbox built for bypass testing",
+      "runs": 3,
       "challengeWaitMs": 20000,
       "antiBot": { "evaluator": "cloudflare", "successText": "You bypassed" }
     },
@@ -51,6 +57,7 @@
       "group": "antibot",
       "url": "https://www.scrapingcourse.com/antibot-challenge",
       "description": "Stricter Cloudflare anti-bot configuration on the same sandbox",
+      "runs": 3,
       "challengeWaitMs": 20000,
       "antiBot": { "evaluator": "cloudflare", "successText": "You bypassed" }
     },

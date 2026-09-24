@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import puppeteer, { type Browser, type LaunchOptions as PuppeteerLaunchOptions, type Page } from 'puppeteer';
 import { sleep } from '../util/time.js';
 import type {
@@ -10,6 +9,7 @@ import type {
   NavigationResult,
   PageHandle,
 } from './base.js';
+import { benchChromeAvailability, benchChromePath } from './chrome.js';
 import { BLOCKED_RESOURCE_TYPES, completeNavigation, failedNavigation } from './common.js';
 
 const blockingPages = new WeakSet<Page>();
@@ -70,6 +70,7 @@ export class PuppeteerAdapter implements BrowserAdapter {
     const launcher = await this.launcher();
     this.browser = await launcher.launch({
       headless: true,
+      executablePath: await benchChromePath(),
       args: options.proxyUrl ? [`--proxy-server=${options.proxyUrl}`] : [],
     });
     this.page = await this.browser.newPage();
@@ -104,17 +105,11 @@ export class PuppeteerAdapter implements BrowserAdapter {
   }
 }
 
-export async function chromeForTestingAvailability() {
-  const executable = await puppeteer.executablePath();
-  return existsSync(executable)
-    ? { available: true }
-    : { available: false, reason: `Chrome for Testing not found at ${executable} (run "npx puppeteer browsers install chrome")` };
-}
-
 export const puppeteerDefinition: AdapterDefinition = {
   name: 'puppeteer',
   description: 'Chrome for Testing (headless) driven by Puppeteer over CDP',
+  engine: 'chromium',
   create: () => new PuppeteerAdapter('puppeteer', async () => puppeteer),
-  checkAvailability: chromeForTestingAvailability,
+  checkAvailability: benchChromeAvailability,
   supportsLite: true,
 };

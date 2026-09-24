@@ -21,6 +21,13 @@ export interface ByteProxy {
   close(): Promise<void>;
 }
 
+/** "host:port" of a CONNECT request, IPv6 literals included ("[::1]:443"). */
+export function connectTarget(authority: string): { host: string; port: number } | null {
+  const match = /^(\[[0-9a-f:.]+\]|[^:[\]]+)(?::(\d{1,5}))?$/i.exec(authority);
+  if (!match) return null;
+  return { host: match[1].replace(/^\[(.*)\]$/, '$1'), port: match[2] ? Number(match[2]) : 443 };
+}
+
 const HOP_BY_HOP = new Set(['proxy-connection', 'proxy-authorization', 'connection', 'keep-alive', 'te', 'trailer', 'upgrade']);
 
 export async function startByteProxy(extraHosts: string[] = []): Promise<ByteProxy> {
@@ -57,9 +64,13 @@ export async function startByteProxy(extraHosts: string[] = []): Promise<BytePro
   };
 
   const onConnect = (req: http.IncomingMessage, client: Socket, head: Buffer) => {
-    const [host, port] = (req.url ?? '').split(':');
     track(client);
-    const upstream = net.connect(Number(port) || 443, host, () => {
+    const target = connectTarget(req.url ?? '');
+    if (!target) {
+      client.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+      return;
+    }
+    const upstream = net.connect(target.port, target.host, () => {
       client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       if (head.length) {
         counts.bytesUp += head.length;

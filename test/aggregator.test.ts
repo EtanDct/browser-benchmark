@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { aggregate, computeStats, tagSimilarity } from '../src/aggregate/aggregator.js';
+import { aggregate, campaignOf, computeStats, consensusTagCounts, latestCampaign, tagSimilarity, tCritical } from '../src/aggregate/aggregator.js';
 import type { RunRecord } from '../src/runner/types.js';
 
 const environment = { platform: 'linux', osRelease: '6', arch: 'x64', cpuModel: 'cpu', cpuCount: 4, totalMemBytes: 8e9, nodeVersion: 'v22' };
@@ -38,6 +38,12 @@ describe('computeStats', () => {
     assert.deepEqual(computeStats([5])!.ci95, [5, 5]);
     assert.equal(computeStats([]), null);
   });
+
+  it('uses the next smaller tabulated df between rows, for a slightly wider interval', () => {
+    assert.equal(tCritical(9), 2.262);
+    assert.equal(tCritical(11), 2.228);
+    assert.equal(tCritical(500), 1.98);
+  });
 });
 
 describe('tagSimilarity', () => {
@@ -68,7 +74,27 @@ describe('aggregate', () => {
     assert.equal(cell.memAvgMB?.mean, 2);
     assert.equal(cell.memPeakMB?.mean, 3);
     assert.equal(cell.cpuAvgPercent?.mean, 25);
+    // 50 % of one core over 200 ms, computed from the samples of records without cpuSeconds.
+    assert.equal(cell.cpuSeconds?.median, 0.1);
+    assert.equal(cell.series[0].cpuSec, 0.1);
     assert.deepEqual(cell.series[1].samples[1], [200, 3, 50]);
+  });
+
+  it('keeps anti-bot pages out of performance and fidelity figures', () => {
+    const report = aggregate([
+      record('a', 'page', 1),
+      record('a', 'cf', 5, { antiBot: { outcome: 'challenge', passed: false, detail: '', score: 0 } }, 'antibot'),
+    ]);
+    assert.equal(report.browserSummaries[0].meanLoadTimeMs, 100);
+    assert.equal(report.cells.find((c) => c.target === 'cf')?.fidelity, null);
+    assert.equal(report.targets.find((t) => t.name === 'cf')?.antiBot, true);
+  });
+
+  it('reports the expected-content score of local pages', () => {
+    const content = { score: 0.5, checks: [{ selector: '#app tr', expected: 500, found: 250 }] };
+    const cell = aggregate([record('a', 'spa', 1, { content }), record('a', 'spa', 2, { content })]).cells[0];
+    assert.deepEqual(cell.content, { score: 0.5, checks: [{ selector: '#app tr', expected: 500, foundMedian: 250 }] });
+    assert.equal(cell.series[0].contentScore, 0.5);
   });
 
   it('scores DOM fidelity against the cross-browser consensus', () => {
@@ -82,6 +108,19 @@ describe('aggregate', () => {
     assert.equal(byBrowser.b?.matchRate, 0.5);
     assert.equal(byBrowser.b?.distinctHashes, 2);
     assert.equal(byBrowser.c?.matchRate, 0);
+  });
+
+  it('builds the DOM consensus from one vote per engine, full mode only', () => {
+    const chromiumDom = { DIV: 10, P: 2 };
+    const otherDom = { DIV: 10, P: 4 };
+    const run = (browser: string, domTagCounts: Record<string, number>, mode: 'full' | 'lite' = 'full') =>
+      ({ ...record(browser, 'page', 1, { domTagCounts }), mode });
+    const runs = [
+      run('puppeteer', chromiumDom), run('puppeteer-stealth', chromiumDom), run('patchright', chromiumDom),
+      run('playwright-chromium', chromiumDom), run('puppeteer+lite', chromiumDom, 'lite'),
+      run('playwright-firefox', otherDom), run('playwright-webkit', otherDom),
+    ];
+    assert.deepEqual(consensusTagCounts(runs), otherDom);
   });
 
   it('counts failed page loads as failed anti-bot attempts', () => {
@@ -100,5 +139,14 @@ describe('aggregate', () => {
     assert.deepEqual(cell.antiBot?.outcomes, { passed: 1, challenge: 1 });
     assert.equal(report.browserSummaries[0].antiBotPassRate, 1 / 3);
     assert.deepEqual(cell.errors, ['timeout']);
+  });
+});
+
+describe('campaigns', () => {
+  it('groups records by campaign id, older records as "legacy"', () => {
+    const older = { ...record('a', 'page', 1), campaign: 'w1' };
+    const newer = { ...record('a', 'page', 2), campaign: 'w2' };
+    assert.equal(latestCampaign([older, newer]), 'w2');
+    assert.equal(campaignOf(record('a', 'page', 3)), 'legacy');
   });
 });

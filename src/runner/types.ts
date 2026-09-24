@@ -1,4 +1,4 @@
-import type { NavigationResult } from '../adapters/base.js';
+import type { Engine, NavigationResult } from '../adapters/base.js';
 import type { MemoryMetric, ResourceSample, ResourceSummary } from '../monitor/resource-sampler.js';
 import type { ByteCounts } from '../network/byte-proxy.js';
 
@@ -25,6 +25,9 @@ export interface RunRecord {
   mode?: RunMode;
   /** Anti-detection variant (stealth plugin, patched driver, anti-detect build). */
   stealth?: boolean;
+  engine?: Engine;
+  /** Campaign this run belongs to (--campaign): history entries only aggregate their own campaign. */
+  campaign?: string;
   browserVersion?: string;
   target: string;
   targetGroup: string;

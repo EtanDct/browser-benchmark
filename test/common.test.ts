@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { completeNavigation, hashDomStructure, type PageSnapshot } from '../src/adapters/common.js';
+import { completeNavigation, hashDomStructure, scoreContent, type PageSnapshot } from '../src/adapters/common.js';
 
 const snapshot = (overrides: Partial<PageSnapshot> = {}): PageSnapshot => ({
   title: 'Home',
@@ -24,6 +24,14 @@ describe('completeNavigation', () => {
     assert.equal(result.httpStatus, 200);
     assert.equal(result.domSnapshotHash, hashDomStructure('HTML,HEAD,BODY'));
     assert.equal(result.antiBot, undefined);
+  });
+
+  it('scores the content the page declares it should end up with', async () => {
+    const expected = [{ selector: '#app tr', expected: 500, found: 250 }, { selector: 'h1', expected: 1, found: 1 }];
+    const result = await completeNavigation(async () => snapshot({ expected }), { loadTimeMs: 10 }, options);
+    assert.equal(result.content?.score, 0.75);
+    assert.equal(scoreContent([{ selector: 'p', expected: 0, found: 0 }]).score, 1);
+    assert.equal(scoreContent([{ selector: 'p', expected: 4, found: 8 }]).score, 0.5);
   });
 
   it('polls while a challenge is displayed and reports when it clears', async () => {

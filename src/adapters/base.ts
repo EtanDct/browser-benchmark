@@ -16,6 +16,13 @@ export interface NavigateOptions {
   blockResources?: boolean;
 }
 
+/** Expected content a local fixture declares about itself (<meta name="bench-expect">), checked after load. */
+export interface ContentCheck {
+  /** Mean over selectors of min(found, expected) / max(found, expected): 1 = exactly the expected content. */
+  score: number;
+  checks: Array<{ selector: string; expected: number; found: number }>;
+}
+
 export interface DomStats {
   elementCount: number;
   textLength: number;
@@ -33,6 +40,8 @@ export interface NavigationResult {
   /** Element count per tag name, for a graded DOM similarity instead of all-or-nothing hash equality. */
   domTagCounts?: Record<string, number>;
   domStats?: DomStats;
+  /** Present when the page declares its expected content (local fixtures). */
+  content?: ContentCheck;
   finalUrl?: string;
   title?: string;
   /** loadEventEnd from the Navigation Timing API, when the browser exposes it. */
@@ -53,12 +62,17 @@ export interface LaunchResult {
 export interface Availability {
   available: boolean;
   reason?: string;
+  /** Where the browser process will run; 'wsl' makes the runner keep a WSL sampler warm. Defaults to 'host'. */
+  location?: ProcessLocation;
   /**
-   * Set when the browser runs inside WSL: address of this machine as seen from there.
-   * The runner then also serves local:// fixtures and the proxy on it, and keeps a WSL sampler warm.
+   * Set when the browser runs inside WSL behind NAT: address of this machine as seen from there.
+   * The runner then also serves local:// fixtures and the proxy on it.
    */
   wslHostIp?: string;
 }
+
+/** Rendering/JS engine family: DOM consensus gives one vote per engine, not per driver or variant. */
+export type Engine = 'chromium' | 'gecko' | 'webkit' | 'lightpanda';
 
 /** One more tab/page of an already launched browser (throughput tests). */
 export interface PageHandle {
@@ -82,6 +96,7 @@ export interface BrowserAdapter {
 export interface AdapterDefinition {
   name: string;
   description: string;
+  engine: Engine;
   create(): BrowserAdapter;
   /** Cheap pre-flight check so a campaign can skip a browser that is not installed. */
   checkAvailability(): Promise<Availability>;
