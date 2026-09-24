@@ -7,6 +7,8 @@ import { LineProtocolProbe } from './line-probe.js';
  * (what Task Manager uses) returns pid, parent pid, private working set and CPU times of every process,
  * in a few ms and without opening handles on sandboxed renderer processes.
  *
+ * It also keeps Windows from idle-sleeping while it runs, i.e. for the whole campaign.
+ *
  * Speaks the LineProtocolProbe protocol.
  * Offsets are for the x64 SYSTEM_PROCESS_INFORMATION layout.
  */
@@ -20,6 +22,9 @@ using System.Threading;
 public static class BenchSampler {
   [DllImport("ntdll.dll")]
   static extern int NtQuerySystemInformation(int infoClass, IntPtr buffer, int length, out int returnLength);
+
+  [DllImport("kernel32.dll")]
+  static extern uint SetThreadExecutionState(uint flags);
 
   struct Proc { public long Pid; public long ParentPid; public long CreateTime; public long Cpu; public long PrivateWs; }
 
@@ -61,6 +66,9 @@ public static class BenchSampler {
 
   public static void Run(int intervalMs) {
     if (IntPtr.Size != 8) throw new Exception("64-bit PowerShell required");
+    // ES_CONTINUOUS | ES_SYSTEM_REQUIRED: no idle sleep while the sampler (so the campaign) runs; a
+    // sleep freezes runs mid-measurement. Released when this process exits, no setting is changed.
+    SetThreadExecutionState(0x80000000u | 0x00000001u);
     Thread reader = new Thread(delegate() {
       string line;
       while ((line = Console.In.ReadLine()) != null) {

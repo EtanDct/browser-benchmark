@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import type { AdapterDefinition, ProcessLocation } from '../adapters/base.js';
 import { startFixtureServer, type FixtureServer } from '../fixtures/server.js';
 import { ResourceSampler } from '../monitor/resource-sampler.js';
@@ -44,6 +45,13 @@ export async function prepareRuntime(options: RuntimeOptions): Promise<Runtime> 
     if (availability.wslHostIp) wslHostIps.add(availability.wslHostIp);
     locations.add(availability.location ?? 'host');
     available.push(definition);
+  }
+
+  // A sleep freezes runs mid-measurement. Windows: the sampler holds the request (windows-probe.ts).
+  if (process.platform === 'darwin') {
+    const caffeinate = spawn('caffeinate', ['-i', '-w', String(process.pid)], { stdio: 'ignore' });
+    caffeinate.on('error', () => undefined);
+    caffeinate.unref();
   }
 
   const fixtures = options.fixtures && available.length ? await startFixtureServer([...wslHostIps]) : null;
