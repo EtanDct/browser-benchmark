@@ -22,6 +22,21 @@ function crop(png: PNG, width: number, height: number): Buffer {
 }
 
 /**
+ * Share of matching pixels. Pixels outside the common area count as mismatches: a capture that is
+ * smaller than the reference (resize failed, page cut short) must not score on its overlap alone.
+ */
+export function screenshotSimilarity(reference: PNG, png: PNG): number {
+  const width = Math.min(png.width, reference.width);
+  const height = Math.min(png.height, reference.height);
+  const total = Math.max(png.width, reference.width) * Math.max(png.height, reference.height);
+  if (!total) return 0;
+  const diff = width && height
+    ? pixelmatch(crop(reference, width, height), crop(png, width, height), undefined, width, height, { threshold: 0.1 })
+    : 0;
+  return Math.round((1 - (diff + total - width * height) / total) * 1000) / 1000;
+}
+
+/**
  * Compares every browser's screenshot of a page to one reference browser's. Only meaningful on
  * deterministic pages (local fixtures): live sites differ between two loads of the same browser.
  */
@@ -36,13 +51,20 @@ export async function computeVisualScores(records: RunRecord[], screensDir: stri
   for (const target of new Set(shots.map((r) => r.target))) {
     const own = shots.filter((r) => r.target === target);
     const byBrowser = new Map(own.map((r) => [r.browser, r.screenshot!]));
-    const reference = REFERENCE_ORDER.find((b) => byBrowser.has(b)) ?? [...byBrowser.keys()].sort()[0];
-    let referencePng: PNG;
-    try {
-      referencePng = PNG.sync.read(await readFile(path.join(screensDir, byBrowser.get(reference)!)));
-    } catch {
-      continue;
+    // Preferred renderers first; an unreadable capture passes the role to the next browser.
+    const candidates = [...REFERENCE_ORDER.filter((b) => byBrowser.has(b)), ...[...byBrowser.keys()].filter((b) => !REFERENCE_ORDER.includes(b)).sort()];
+    let reference: string | undefined;
+    let referencePng: PNG | undefined;
+    for (const candidate of candidates) {
+      try {
+        referencePng = PNG.sync.read(await readFile(path.join(screensDir, byBrowser.get(candidate)!)));
+        reference = candidate;
+        break;
+      } catch {
+        // Try the next candidate.
+      }
     }
+    if (!reference || !referencePng) continue;
     references.set(target, reference);
 
     for (const [browser, file] of byBrowser) {
@@ -52,10 +74,7 @@ export async function computeVisualScores(records: RunRecord[], screensDir: stri
       }
       try {
         const png = PNG.sync.read(await readFile(path.join(screensDir, file)));
-        const width = Math.min(png.width, referencePng.width);
-        const height = Math.min(png.height, referencePng.height);
-        const diff = pixelmatch(crop(referencePng, width, height), crop(png, width, height), undefined, width, height, { threshold: 0.1 });
-        scores.set(`${browser}\u0000${target}`, { similarity: Math.round((1 - diff / (width * height)) * 1000) / 1000, reference, isReference: false });
+        scores.set(`${browser}\u0000${target}`, { similarity: screenshotSimilarity(referencePng, png), reference, isReference: false });
       } catch {
         // Unreadable screenshot: this browser simply has no visual score for the page.
       }

@@ -10,6 +10,6 @@
     "resolveJsonModule": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "dashboard/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.ts", "dashboard/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules", "results"]
 }

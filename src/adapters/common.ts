@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { evaluateAntiBot, type AntiBotVerdict } from '../antibot/evaluators.js';
 import { errorMessage, sleep } from '../util/time.js';
-import type { NavigateOptions, NavigationResult } from './base.js';
+import type { ContentCheck, NavigateOptions, NavigationResult } from './base.js';
 
 export interface PageSnapshot {
   title: string;
@@ -15,6 +15,8 @@ export interface PageSnapshot {
   textLength: number;
   navLoadMs?: number;
   responseStatus?: number;
+  /** Selector counts for the expectations the page declares in <meta name="bench-expect">. */
+  expected?: Array<{ selector: string; expected: number; found: number }>;
 }
 
 /**
@@ -53,6 +55,14 @@ export const SNAPSHOT_EXPRESSION = `(() => {
       if (n.responseStatus) responseStatus = n.responseStatus;
     }
   } catch (e) {}
+  let expected;
+  try {
+    const meta = d.querySelector('meta[name="bench-expect"]');
+    if (meta) {
+      const spec = JSON.parse(meta.getAttribute('content'));
+      expected = Object.keys(spec).map((selector) => ({ selector: selector, expected: spec[selector], found: d.querySelectorAll(selector).length }));
+    }
+  } catch (e) {}
   return {
     title: d.title || '',
     url: String(location.href),
@@ -63,7 +73,8 @@ export const SNAPSHOT_EXPRESSION = `(() => {
     elementCount: els.length,
     textLength: text.length,
     navLoadMs: navLoadMs,
-    responseStatus: responseStatus
+    responseStatus: responseStatus,
+    expected: expected
   };
 })()`;
 
@@ -83,6 +94,7 @@ async function takeSnapshot(evaluate: Evaluator): Promise<PageSnapshot> {
           text: raw.text ?? '',
           navLoadMs: raw.navLoadMs ?? undefined,
           responseStatus: raw.responseStatus ?? undefined,
+          expected: raw.expected ?? undefined,
         };
       }
       lastError = new Error('snapshot returned an empty result');
@@ -92,6 +104,14 @@ async function takeSnapshot(evaluate: Evaluator): Promise<PageSnapshot> {
     await sleep(500);
   }
   throw lastError;
+}
+
+/** 1 when every selector matches exactly the expected number of elements, partial credit otherwise. */
+export function scoreContent(checks: ContentCheck['checks']): ContentCheck {
+  const ratio = ({ expected, found }: { expected: number; found: number }) =>
+    expected === found ? 1 : Math.min(expected, found) / Math.max(expected, found);
+  const score = checks.length ? checks.reduce((sum, c) => sum + ratio(c), 0) / checks.length : 1;
+  return { score: Math.round(score * 1000) / 1000, checks };
 }
 
 export function hashDomStructure(tags: string): string {
@@ -153,6 +173,7 @@ export async function completeNavigation(
       domSnapshotHash: hashDomStructure(snapshot.tags),
       domTagCounts: snapshot.tagCounts ?? undefined,
       domStats: { elementCount: snapshot.elementCount, textLength: snapshot.textLength },
+      content: snapshot.expected ? scoreContent(snapshot.expected) : undefined,
       finalUrl: snapshot.url,
       title: snapshot.title,
       navTimingLoadMs: snapshot.navLoadMs !== undefined ? Math.round(snapshot.navLoadMs) : undefined,

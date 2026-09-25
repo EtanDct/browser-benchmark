@@ -1,8 +1,9 @@
-"""Samples memory/CPU of a Linux process tree from inside WSL, for browsers hosted there.
+"""Samples memory/CPU of a Linux process tree: on Linux hosts, and inside WSL for browsers hosted there.
 
 Same line protocol as the Windows sampler: a root PID on stdin starts tracking its tree,
 "0" pauses, EOF exits; one JSON line per tick. Memory is USS (Private_Clean + Private_Dirty
-from smaps_rollup), the Linux counterpart of the Windows private working set.
+from smaps_rollup), the Linux counterpart of the Windows private working set: summing RSS over a
+multi-process browser would count its shared libraries once per process.
 """
 import json
 import os

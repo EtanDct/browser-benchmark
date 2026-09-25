@@ -30,14 +30,24 @@ async function installDir(): Promise<string> {
   return INSTALL_DIR.toString();
 }
 
+/**
+ * The executable camoufox-js launches (its LAUNCH_FILE / getPath logic), without calling launchPath():
+ * that one starts a download when Camoufox is missing.
+ */
+export function camoufoxExecutable(dir: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'win32') return path.join(dir, 'camoufox.exe');
+  if (platform === 'darwin') return path.join(dir, 'Camoufox.app', 'Contents', 'MacOS', 'camoufox');
+  return path.join(dir, 'camoufox-bin');
+}
+
 export const camoufoxDefinition: AdapterDefinition = {
   name: 'camoufox',
   description: 'Camoufox (anti-detect Firefox) driven through camoufox-js',
+  engine: 'gecko',
   create: () => new PlaywrightAdapter('camoufox', camoufoxEngine),
   async checkAvailability() {
     const dir = await installDir();
-    const binary = path.join(dir, process.platform === 'win32' ? 'camoufox.exe' : 'camoufox');
-    return existsSync(binary)
+    return existsSync(camoufoxExecutable(dir))
       ? { available: true }
       : { available: false, reason: `Camoufox not found in ${dir} (run "npx camoufox-js fetch", optionally with CAMOUFOX_INSTALL_DIR)` };
   },

@@ -5,7 +5,8 @@ import { deflateSync } from 'node:zlib';
 /**
  * Deterministic pages served on 127.0.0.1, addressed as local://<page>?params in targets.json.
  * Same bytes for every browser and run, which isolates one variable at a time (JS weight, image
- * count...) and makes DOM-hash fidelity comparisons meaningful.
+ * count...), makes DOM fidelity comparisons meaningful, and lets each page declare the exact content
+ * a correct browser must end up with.
  */
 
 const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
@@ -62,7 +63,7 @@ function generatePng(size: number, seed: number): Buffer {
   ]);
 }
 
-function generateHeavyJs(kb: number): string {
+function generateHeavyJs(kb: number): { code: string; count: number } {
   const parts = ['(function(){var F=[];'];
   let size = parts[0].length;
   let i = 0;
@@ -73,7 +74,21 @@ function generateHeavyJs(kb: number): string {
     i++;
   }
   parts.push('var root=document.getElementById("root"),frag=document.createDocumentFragment();for(var j=0;j<F.length;j++)frag.appendChild(F[j]());root.appendChild(frag);document.title="heavy-js ready";})();');
-  return parts.join('\n');
+  return { code: parts.join('\n'), count: i };
+}
+
+const heavyJsCache = new Map<number, { code: string; count: number }>();
+function heavyJs(kb: number): { code: string; count: number } {
+  if (!heavyJsCache.has(kb)) heavyJsCache.set(kb, generateHeavyJs(kb));
+  return heavyJsCache.get(kb)!;
+}
+
+/**
+ * The content a correct browser ends up with, declared by the page itself: selector -> element count.
+ * Checked after load (see SNAPSHOT_EXPRESSION), so JS-built content that never appears is caught.
+ */
+function expect(counts: Record<string, number>): string {
+  return `<meta name="bench-expect" content="${JSON.stringify(counts).replace(/"/g, '&quot;')}">`;
 }
 
 function page(title: string, body: string, head = ''): string {
@@ -85,17 +100,17 @@ const PAGES: Record<string, (params: URLSearchParams) => string> = {
   static: () => {
     const rows = Array.from({ length: 50 }, (_, i) => `<tr><td>${i}</td><td>Row ${i}</td><td>${(i * 7919) % 1000}</td></tr>`).join('');
     const paragraphs = Array.from({ length: 20 }, (_, i) => `<p>Paragraph ${i}: the quick brown fox jumps over the lazy dog.</p>`).join('');
-    return page('static fixture', `<h1>Static fixture</h1>${paragraphs}<table><tr><th>#</th><th>Name</th><th>Value</th></tr>${rows}</table>`);
+    return page('static fixture', `<h1>Static fixture</h1>${paragraphs}<table><tr><th>#</th><th>Name</th><th>Value</th></tr>${rows}</table>`, expect({ p: 20, 'table tr': 51 }));
   },
   'heavy-js': (params) => {
     const kb = Math.min(Number(params.get('kb') ?? 1000), 20_000);
-    return page('heavy-js loading', `<h1>Heavy JS fixture (${kb} KB)</h1><div id="root"></div><script src="/assets/heavy.js?kb=${kb}"></script>`);
+    return page('heavy-js loading', `<h1>Heavy JS fixture (${kb} KB)</h1><div id="root"></div><script src="/assets/heavy.js?kb=${kb}"></script>`, expect({ '#root > div': heavyJs(kb).count }));
   },
   images: (params) => {
     const count = Math.min(Number(params.get('count') ?? 100), 2000);
     const size = Math.min(Number(params.get('size') ?? 256), 2048);
     const imgs = Array.from({ length: count }, (_, i) => `<img src="/assets/img/${i}.png?size=${size}" width="${size}" height="${size}" alt="">`).join('');
-    return page('images fixture', `<h1>Images fixture (${count} x ${size}px)</h1><div class="grid">${imgs}</div>`);
+    return page('images fixture', `<h1>Images fixture (${count} x ${size}px)</h1><div class="grid">${imgs}</div>`, expect({ '.grid img': count }));
   },
   spa: (params) => {
     const items = Math.min(Number(params.get('items') ?? 500), 20_000);
@@ -111,7 +126,7 @@ fetch('/api/items?n=${items}').then(function(r){return r.json();}).then(function
   document.title='spa ready';
 });
 </script>`;
-    return page('spa loading', `<h1>SPA fixture</h1><div id="app">Loading...</div>${script}`);
+    return page('spa loading', `<h1>SPA fixture</h1><div id="app">Loading...</div>${script}`, expect({ '#app tr': items }));
   },
 };
 
@@ -126,7 +141,6 @@ export interface FixtureServer {
  */
 export async function startFixtureServer(extraHosts: string[] = []): Promise<FixtureServer> {
   const pngCache = new Map<string, Buffer>();
-  const jsCache = new Map<number, string>();
 
   const handler: http.RequestListener = (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -144,8 +158,7 @@ export async function startFixtureServer(extraHosts: string[] = []): Promise<Fix
     }
     if (url.pathname === '/assets/heavy.js') {
       const kb = Math.min(Number(url.searchParams.get('kb') ?? 1000), 20_000);
-      if (!jsCache.has(kb)) jsCache.set(kb, generateHeavyJs(kb));
-      return send(200, 'text/javascript', jsCache.get(kb)!);
+      return send(200, 'text/javascript', heavyJs(kb).code);
     }
     if (url.pathname === '/api/items') {
       const n = Math.min(Number(url.searchParams.get('n') ?? 500), 20_000);

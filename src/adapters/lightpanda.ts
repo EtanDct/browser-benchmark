@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer';
 import { findOnPath, getFreePort, waitForPort } from '../util/proc.js';
 import { withTimeout } from '../util/time.js';
-import { findWslBinary, wslAvailable, wslDistroArgs, wslHostIp, wslKill, wslShell } from '../util/wsl.js';
+import { findWslBinary, wslAvailable, wslDistroArgs, wslHostIp, wslKill, wslNetworkingMode, wslShell } from '../util/wsl.js';
 import type {
   AdapterDefinition,
   Availability,
@@ -21,15 +21,18 @@ import { navigatePuppeteerPage, puppeteerPageHandle } from './puppeteer.js';
  * Lightpanda exposes a CDP server (`lightpanda serve`), driven here through puppeteer.connect().
  * Three ways to run it, picked in this order:
  *  - LIGHTPANDA_WS_ENDPOINT: an instance we do not own (Docker...). RAM/CPU are not measured.
- *  - Windows: the Linux build runs inside WSL2 (no native Windows build). Its CDP port is reached
- *    through WSL localhost forwarding and its RAM/CPU are sampled from inside WSL.
+ *  - Windows: the Linux build runs inside WSL2. Lightpanda has no Windows build (upstream issue #2330:
+ *    "not planned", blocked on linking V8's MSVC runtime with Zig's MinGW one). Its CDP port is reached
+ *    through WSL localhost forwarding and its RAM/CPU are sampled from inside WSL. With WSL's mirrored
+ *    networking (.wslconfig: networkingMode=mirrored) both sides share 127.0.0.1 and no NAT hop is added.
  *  - Linux/macOS: the native binary (LIGHTPANDA_BIN or `lightpanda` on PATH).
  */
 const execFileAsync = promisify(execFile);
 
 type Mode =
   | { kind: 'external'; endpoint: string }
-  | { kind: 'wsl'; binary: string; hostIp: string }
+  /** hostIp: this machine's address behind WSL's NAT, or null in mirrored networking (shared loopback). */
+  | { kind: 'wsl'; binary: string; hostIp: string | null }
   | { kind: 'native'; binary: string };
 
 let resolvedMode: Promise<Mode | { kind: 'missing'; reason: string }> | undefined;
@@ -45,6 +48,7 @@ function resolveMode(): Promise<Mode | { kind: 'missing'; reason: string }> {
       if (!binary) {
         return { kind: 'missing', reason: 'not found in WSL: install the Linux build to ~/.local/bin/lightpanda (see README)' };
       }
+      if ((await wslNetworkingMode()) === 'mirrored') return { kind: 'wsl', binary, hostIp: null };
       const hostIp = await wslHostIp();
       if (!hostIp) return { kind: 'missing', reason: 'could not determine the Windows host address from WSL' };
       return { kind: 'wsl', binary, hostIp };
@@ -138,7 +142,7 @@ class LightpandaAdapter implements BrowserAdapter {
 
   /** From WSL, this machine's loopback is the VM's own: local fixtures and the proxy are reached via the host address. */
   private reachable(url: string): string {
-    if (this.mode?.kind !== 'wsl') return url;
+    if (this.mode?.kind !== 'wsl' || !this.mode.hostIp) return url;
     const parsed = new URL(url);
     if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost') return url;
     parsed.hostname = this.mode.hostIp;
@@ -173,6 +177,7 @@ let realVersion: Promise<string> | undefined;
 export const lightpandaDefinition: AdapterDefinition = {
   name: 'lightpanda',
   description: 'Lightpanda (Zig, no rendering engine) driven by Puppeteer over its CDP server',
+  engine: 'lightpanda',
   create: () => new LightpandaAdapter(),
   async checkAvailability(): Promise<Availability> {
     const mode = await resolveMode();
@@ -182,7 +187,9 @@ export const lightpandaDefinition: AdapterDefinition = {
       case 'external':
         return { available: true, reason: `external endpoint ${mode.endpoint}: RAM/CPU not measured` };
       case 'wsl':
-        return { available: true, reason: `runs in WSL (${mode.binary})`, wslHostIp: mode.hostIp };
+        return mode.hostIp
+          ? { available: true, reason: `runs in WSL, NAT networking (${mode.binary})`, location: 'wsl', wslHostIp: mode.hostIp }
+          : { available: true, reason: `runs in WSL, mirrored networking (${mode.binary})`, location: 'wsl' };
       case 'native':
         return { available: true };
     }

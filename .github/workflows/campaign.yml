@@ -14,8 +14,8 @@ on:
         description: Targets (names, groups or "all")
         default: all
       runs:
-        description: Measured runs per (browser, target)
-        default: '5'
+        description: Measured runs per (browser, target); empty = each target's own count (anti-bot pages 3, others 10)
+        default: ''
       modes:
         description: full and/or lite
         default: full
@@ -36,10 +36,13 @@ jobs:
     env:
       BROWSERS: ${{ inputs.browsers || 'all' }}
       TARGETS: ${{ inputs.targets || 'all' }}
-      RUNS: ${{ inputs.runs || '5' }}
+      RUNS: ${{ inputs.runs }}
       MODES: ${{ inputs.modes || 'full' }}
+      CAMPAIGN: gh-${{ github.run_id }}
+      # Outside the workspace so a self-hosted runner keeps it between jobs: fetched once.
       CAMOUFOX_INSTALL_DIR: ${{ github.workspace }}/../camoufox
-      HISTORY_DIR: ${{ github.workspace }}/../bench-history
+      # Recreated for every job: a self-hosted runner does not clean the temp dir's contents reliably.
+      HISTORY_DIR: ${{ runner.temp }}/bench-history
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -47,6 +50,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Chrome for Testing (every Chromium driver) comes with npm ci; chromium here only pulls its system deps.
       - run: npx playwright install --with-deps chromium firefox webkit
       # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor, which Chrome's sandbox needs.
       - name: Allow Chrome's sandbox on Ubuntu 24.04
@@ -62,12 +66,13 @@ jobs:
           path: ${{ env.CAMOUFOX_INSTALL_DIR }}
           key: camoufox-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - name: Install Camoufox
-        run: test -e "$CAMOUFOX_INSTALL_DIR/camoufox" || npx camoufox-js fetch
+        run: test -e "$CAMOUFOX_INSTALL_DIR/camoufox-bin" || npx camoufox-js fetch
 
       - name: Restore campaign history
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          rm -rf "$HISTORY_DIR"
           if git ls-remote --exit-code --heads origin bench-history > /dev/null; then
             git clone --depth 1 --branch bench-history "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$HISTORY_DIR"
           else
@@ -78,9 +83,9 @@ jobs:
           cp "$HISTORY_DIR"/history/*.json results/history/ 2>/dev/null || true
 
       - name: Benchmark campaign
-        run: npm run bench -- --browsers="$BROWSERS" --targets="$TARGETS" --runs="$RUNS" --modes="$MODES" --pause=1000
+        run: npm run bench -- --browsers="$BROWSERS" --targets="$TARGETS" ${RUNS:+--runs="$RUNS"} --modes="$MODES" --campaign="$CAMPAIGN" --pause=1000
       - name: Throughput test
-        run: npm run throughput -- --browsers="$BROWSERS" --concurrency=1,2,4,8 --pages=24
+        run: npm run throughput -- --browsers="$BROWSERS" --concurrency=1,2,4,8
 
       - name: Save campaign history
         run: |
@@ -89,7 +94,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add history
-          git commit -m "Campaign $(date -u +%Y-%m-%dT%H:%MZ) (runs=$RUNS, modes=$MODES)" || exit 0
+          git commit -m "Campaign $CAMPAIGN $(date -u +%Y-%m-%dT%H:%MZ) (runs=${RUNS:-per target}, modes=$MODES)" || exit 0
           git push origin bench-history
       - uses: actions/upload-artifact@v4
         if: always()

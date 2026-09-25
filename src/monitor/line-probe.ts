@@ -13,11 +13,22 @@ export class LineProtocolProbe implements TreeProbe {
 
   constructor(readonly memoryMetric: MemoryMetric, private label: string, private spawnSampler: () => ChildProcess) {}
 
+  get alive(): boolean {
+    return !!this.child && this.child.exitCode === null && this.child.signalCode === null;
+  }
+
+  async restart(): Promise<void> {
+    await this.dispose();
+    await this.start();
+  }
+
   async start(): Promise<void> {
     const child = this.spawnSampler();
     this.child = child;
     let stderr = '';
     child.stderr?.on('data', (chunk) => { stderr += chunk; });
+    // Writing to a sampler that died would otherwise throw EPIPE out of the event loop.
+    child.stdin?.on('error', () => undefined);
 
     await new Promise<void>((resolve, reject) => {
       const lines = createInterface({ input: child.stdout! });
@@ -25,6 +36,11 @@ export class LineProtocolProbe implements TreeProbe {
       child.once('exit', (code) => {
         clearTimeout(failTimer);
         reject(new Error(`${this.label} sampler exited (code ${code}): ${stderr.trim().slice(0, 500)}`));
+      });
+      // Missing interpreter (python3, powershell): the caller falls back or disables monitoring.
+      child.on('error', (err) => {
+        clearTimeout(failTimer);
+        reject(err);
       });
       lines.on('line', (line) => {
         if (line === 'READY') {
@@ -34,7 +50,12 @@ export class LineProtocolProbe implements TreeProbe {
         }
         const current = this.current;
         if (!current || !line.startsWith('{')) return;
-        const parsed = JSON.parse(line) as { root: number; t: number; mem: number; cpu: number | null; n: number };
+        let parsed: { root: number; t: number; mem: number; cpu: number | null; n: number };
+        try {
+          parsed = JSON.parse(line);
+        } catch {
+          return; // A garbled line only loses one sample.
+        }
         if (parsed.root !== current.pid) return;
         current.onSample({ epochMs: parsed.t, memBytes: parsed.mem, cpuPercent: parsed.cpu, processCount: parsed.n });
       });
@@ -53,7 +74,7 @@ export class LineProtocolProbe implements TreeProbe {
 
   async dispose(): Promise<void> {
     const child = this.child;
-    if (!child || child.exitCode !== null) return;
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
     child.removeAllListeners('exit');
     child.stdin?.end();
     const exited = new Promise((resolve) => child.once('exit', resolve));

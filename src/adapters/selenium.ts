@@ -5,6 +5,7 @@ import chrome from 'selenium-webdriver/chrome.js';
 import { errorMessage, sleep } from '../util/time.js';
 import { getFreePort, waitForPort } from '../util/proc.js';
 import type { AdapterDefinition, BrowserAdapter, LaunchOptions, LaunchResult, NavigateOptions, NavigationResult } from './base.js';
+import { benchChromeAvailability, benchChromePath } from './chrome.js';
 import { BLOCKED_URL_PATTERNS, completeNavigation, failedNavigation } from './common.js';
 
 interface BinaryPaths { driverPath: string; browserPath: string }
@@ -14,16 +15,22 @@ const { getBinaryPaths } = require('selenium-webdriver/common/driverFinder') as 
   getBinaryPaths(capabilities: unknown): BinaryPaths;
 };
 
-let cachedPaths: BinaryPaths | undefined;
+let cachedPaths: Promise<BinaryPaths> | undefined;
 
 /**
- * Selenium Manager resolves (and downloads if needed) chromedriver + Chrome. Resolved once per
- * campaign so its lookup time does not pollute every run's launch time.
+ * Selenium Manager resolves (and downloads if needed) the chromedriver matching the benchmark Chrome
+ * build, the same one the other Chromium drivers launch. Resolved once per campaign so its lookup
+ * time does not pollute every run's launch time.
  */
-function resolvePaths(): BinaryPaths {
-  cachedPaths ??= getBinaryPaths(new chrome.Options());
+function resolvePaths(): Promise<BinaryPaths> {
+  cachedPaths ??= benchChromePath().then((browserPath) => {
+    const { driverPath } = getBinaryPaths(new chrome.Options().setBinaryPath(browserPath));
+    return { driverPath, browserPath };
+  });
   return cachedPaths;
 }
+
+type DevTools = { sendDevToolsCommand(cmd: string, params: object): Promise<void> };
 
 /**
  * chromedriver is spawned by us (instead of letting Selenium do it) so its PID is known:
@@ -36,14 +43,16 @@ class SeleniumChromeAdapter implements BrowserAdapter {
   private blocking = false;
 
   async launch(launchOptions: LaunchOptions = {}): Promise<LaunchResult> {
-    const { driverPath, browserPath } = resolvePaths();
+    const { driverPath, browserPath } = await resolvePaths();
     const port = await getFreePort();
     const driverProcess = spawn(driverPath, [`--port=${port}`], { stdio: 'ignore' });
     this.driverProcess = driverProcess;
     await waitForPort(port, 15_000, () => driverProcess.exitCode === null);
 
     const options = new chrome.Options();
-    options.addArguments('--headless=new');
+    // --hide-scrollbars: Puppeteer and Playwright pass it by default in headless. Without it the page
+    // lays out 15 px narrower and every capture differs from theirs, although the rendering is the same.
+    options.addArguments('--headless=new', '--hide-scrollbars');
     if (launchOptions.proxyUrl) options.addArguments(`--proxy-server=${launchOptions.proxyUrl}`);
     options.setBinaryPath(browserPath);
     options.setPageLoadStrategy('normal');
@@ -61,7 +70,7 @@ class SeleniumChromeAdapter implements BrowserAdapter {
     if (!driver) throw new Error('launch() must be called before navigate()');
     if (options.blockResources && !this.blocking) {
       // WebDriver has no request interception; Chrome's DevTools can block by URL pattern instead.
-      const cdp = driver as unknown as { sendDevToolsCommand(cmd: string, params: object): Promise<void> };
+      const cdp = driver as unknown as DevTools;
       await cdp.sendDevToolsCommand('Network.enable', {});
       await cdp.sendDevToolsCommand('Network.setBlockedURLs', { urls: BLOCKED_URL_PATTERNS });
       this.blocking = true;
@@ -80,7 +89,8 @@ class SeleniumChromeAdapter implements BrowserAdapter {
   async screenshot(width: number, height: number): Promise<Buffer> {
     const driver = this.driver;
     if (!driver) throw new Error('launch() must be called before screenshot()');
-    await driver.manage().window().setRect({ width, height });
+    // Viewport size, as the other adapters set it: the window size would include headless window chrome.
+    await (driver as unknown as DevTools).sendDevToolsCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await sleep(300);
     return Buffer.from(await driver.takeScreenshot(), 'base64');
   }
@@ -101,14 +111,18 @@ class SeleniumChromeAdapter implements BrowserAdapter {
 
 export const seleniumChromeDefinition: AdapterDefinition = {
   name: 'selenium-chrome',
-  description: 'Chrome (headless) driven by Selenium WebDriver + chromedriver',
+  description: 'Benchmark Chrome build (headless) driven by Selenium WebDriver + chromedriver',
+  engine: 'chromium',
   create: () => new SeleniumChromeAdapter(),
   async checkAvailability() {
+    const chromeAvailability = await benchChromeAvailability();
+    if (!chromeAvailability.available) return chromeAvailability;
     try {
-      resolvePaths();
+      await resolvePaths();
       return { available: true };
     } catch (err) {
-      return { available: false, reason: `Selenium Manager could not resolve chromedriver/Chrome: ${errorMessage(err)}` };
+      cachedPaths = undefined;
+      return { available: false, reason: `Selenium Manager could not resolve chromedriver: ${errorMessage(err)}` };
     }
   },
   supportsLite: true,

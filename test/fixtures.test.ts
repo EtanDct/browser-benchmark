@@ -28,6 +28,20 @@ describe('fixture server', () => {
     assert.ok(js.length >= 50 * 1024 && js.length < 52 * 1024, `got ${js.length} bytes`);
   });
 
+  it('declares the content a correct browser ends up with', async () => {
+    const expectOf = async (page: string) => {
+      const html = await (await fetch(server.resolve(`local://${page}`))).text();
+      const content = /<meta name="bench-expect" content="([^"]*)">/.exec(html)?.[1];
+      assert.ok(content, `${page} declares no expectation`);
+      return JSON.parse(content.replace(/&quot;/g, '"')) as Record<string, number>;
+    };
+    const js = await (await fetch(server.resolve('local://assets/heavy.js?kb=10'))).text();
+    assert.deepEqual(await expectOf('heavy-js?kb=10'), { '#root > div': js.split('F.push(').length - 1 });
+    assert.deepEqual(await expectOf('spa?items=5'), { '#app tr': 5 });
+    assert.deepEqual(await expectOf('images?count=3&size=16'), { '.grid img': 3 });
+    assert.deepEqual(await expectOf('static'), { p: 20, 'table tr': 51 });
+  });
+
   it('returns JSON items for the SPA', async () => {
     const items = await (await fetch(server.resolve('local://api/items?n=4'))).json() as unknown[];
     assert.equal(items.length, 4);

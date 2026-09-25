@@ -138,6 +138,7 @@ td { font-variant-numeric: tabular-nums; }
 .meter span { display: block; height: 100%; background: var(--text-secondary); }
 .antibot-summary { margin: 0 0 6px; font-weight: 600; }
 
+[hidden] { display: none !important; }
 .drill-controls { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; align-items: center; }
 .drill-controls label { color: var(--text-secondary); font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
 select {
@@ -261,7 +262,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
     <section>
       <h2>Comparaison croisée</h2>
-      <p class="hint">Chaque case est un score sur 100 (plus foncé = meilleur), avec la valeur mesurée en dessous. Performance (vitesse, démarrage, mémoire, CPU) : score relatif au meilleur navigateur, cible par cible (2× plus lent que le meilleur = 50), puis moyenné sur les cibles. Anti-bot, fidélité et fiabilité : taux absolus. Survoler une case pour le détail.</p>
+      <p class="hint">Chaque case est un score sur 100 (plus foncé = meilleur), avec la valeur mesurée en dessous. Performance (vitesse, démarrage, mémoire au pic, secondes de CPU, réseau) : score relatif au meilleur navigateur, cible par cible (2× plus lent que le meilleur = 50), puis moyenné sur les cibles. Anti-bot, fidélité et fiabilité : taux absolus. Vitesse, mémoire, CPU, réseau et fidélité ne comptent que les pages de performance et locales : sur une page anti-bot, celui qui passe le challenge charge la vraie page, plus lourde, et serait pénalisé. Survoler une case pour le détail.</p>
       <div class="card table-wrap"><table id="ranking-table" class="ranking"></table></div>
       <p class="hint note" id="ranking-notes"></p>
     </section>
@@ -270,7 +271,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   <div id="view-details" role="tabpanel" aria-labelledby="tab-details" hidden>
   <section>
     <h2>Vue d'ensemble</h2>
-    <p class="hint">Agrégé sur les cibles sélectionnées. Temps de chargement = moyenne des médianes par cible ; mémoire = <span id="mem-metric"></span>, somme sur tout l'arbre de process.</p>
+    <p class="hint">Agrégé sur les cibles sélectionnées ; chargement, RAM, CPU, réseau et fidélité sur les pages de performance et locales seulement. Temps de chargement = moyenne des médianes par cible ; CPU = secondes de processeur consommées par page ; mémoire = <span id="mem-metric"></span>, somme sur tout l'arbre de process.</p>
     <div class="card table-wrap"><table id="summary-table"></table></div>
   </section>
 
@@ -322,7 +323,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
   <section>
     <h2>Détail navigateur × cible</h2>
-    <p class="hint">Fidélité = part des runs dont la structure DOM (hash de la séquence de balises) est identique au consensus inter-navigateurs pour cette cible.</p>
+    <p class="hint">Contenu = éléments que la page locale annonce devoir contenir, retrouvés après chargement (par exemple les 500 lignes construites en JS). DOM similaire = similarité du nombre d'éléments par balise avec le DOM sur lequel les moteurs s'accordent (un vote par moteur : Chromium, Gecko, WebKit, Lightpanda). Pas de fidélité sur les pages anti-bot.</p>
     <div class="card">
       <div class="table-wrap"><table id="detail-table"></table></div>
       <nav class="pager" id="detail-pager" aria-label="Pagination du détail"></nav>
@@ -339,6 +340,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         <p>Le test ouvre plusieurs pages en parallèle dans un même navigateur (1, 2, 4 puis 8) et mesure les pages par minute et la mémoire. Il s'ajoute à la fin d'une campagne complète, ou se lance seul avec <code>npm run throughput</code>, puis <code>npm run dashboard</code>.</p>
       </div>
       <div id="tp-content">
+      <div class="drill-controls" id="tp-controls"><label>Cible <select id="tp-target-select"></select></label></div>
       <div class="grid-2">
         <div class="card">
           <h3>Pages par minute</h3>
@@ -390,6 +392,15 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   var metaOf = {};
   data.cells.forEach(function (c) { metaOf[c.browser] = { adapter: c.adapter || c.browser, mode: c.mode || 'full', stealth: !!c.stealth }; });
   (data.throughput || []).forEach(function (t) { if (!metaOf[t.browser]) metaOf[t.browser] = { adapter: t.browser, mode: 'full', stealth: !!t.stealth }; });
+  // Browsers only present in older campaigns still get their family color and variant texture.
+  var STEALTH_ADAPTERS = ['puppeteer-stealth', 'patchright', 'camoufox'];
+  (data.history || []).forEach(function (h) {
+    h.browsers.forEach(function (b) {
+      if (metaOf[b.browser]) return;
+      var adapter = b.adapter || b.browser.replace(/\+lite$/, '');
+      metaOf[b.browser] = { adapter: adapter, mode: b.mode || (/\+lite$/.test(b.browser) ? 'lite' : 'full'), stealth: b.stealth !== undefined ? !!b.stealth : STEALTH_ADAPTERS.indexOf(adapter) >= 0 };
+    });
+  });
   function familyOf(key) { var adapter = (metaOf[key] || {}).adapter || key; return FAMILY_OF[adapter] || adapter; }
   function variantOf(key) { var m = metaOf[key] || {}; return m.mode === 'lite' ? 'lite' : m.stealth ? 'stealth' : 'plain'; }
   var slotOf = {};
@@ -498,6 +509,12 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     ]);
   }
 
+  // Anti-bot pages measure detection only: speed, resources and fidelity there would reward being blocked early.
+  var ANTIBOT_TARGET = {};
+  data.targets.forEach(function (t) { ANTIBOT_TARGET[t.name] = typeof t.antiBot === 'boolean' ? t.antiBot : t.group === 'antibot'; });
+  function isPerfCell(c) { return !ANTIBOT_TARGET[c.target]; }
+  function cpuSecondsOfCell(c) { return c.cpuSeconds ? c.cpuSeconds.median : null; }
+
   function visibleCells() {
     return data.cells.filter(function (c) { return state.browsers.has(c.browser) && state.targets.has(c.target); });
   }
@@ -560,7 +577,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   function renderSummary() {
     var table = document.getElementById('summary-table');
     table.replaceChildren();
-    var head = ['Navigateur', 'Runs', 'Succès', 'Anti-bot passé', 'Contrôles réussis', 'Chargement', 'RAM moy.', 'RAM pic', 'CPU moy.', 'Réseau', 'Fidélité DOM'];
+    var head = ['Navigateur', 'Runs', 'Succès', 'Anti-bot passé', 'Contrôles réussis', 'Chargement', 'RAM moy.', 'RAM pic', 'CPU / page', 'Réseau', 'Contenu attendu', 'DOM similaire'];
     table.appendChild(el('thead', {}, [el('tr', {}, head.map(function (h) { return el('th', { text: h }); }))]));
     var body = el('tbody');
     var cells = visibleCells();
@@ -572,19 +589,21 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       var ab = own.filter(function (c) { return c.antiBot; });
       var abEval = ab.reduce(function (s, c) { return s + c.antiBot.evaluated; }, 0);
       var abPass = ab.reduce(function (s, c) { return s + c.antiBot.passed; }, 0);
-      var peak = own.reduce(function (m, c) { return c.memPeakMB ? Math.max(m, c.memPeakMB.max) : m; }, 0);
+      var perf = own.filter(isPerfCell);
+      var peak = perf.reduce(function (m, c) { return c.memPeakMB ? Math.max(m, c.memPeakMB.max) : m; }, 0);
       body.appendChild(el('tr', {}, [
         el('td', {}, [browserLabel(b, versionOf(b))]),
         el('td', { text: String(runs) }),
         el('td', { text: pct(successes / runs) }),
         el('td', {}, [abEval ? statusBadge(abPass / abEval, abPass + '/' + abEval + ' runs non bloqués') : el('span', { class: 'muted', text: '—' })]),
         el('td', { text: pct(discretionOf(own)), title: 'part moyenne des contrôles de détection réussis, même quand le navigateur est repéré' }),
-        el('td', { text: fmt(mean(own.map(function (c) { return c.loadTimeMs && c.loadTimeMs.median; })), 0, ' ms') }),
-        el('td', { text: fmt(mean(own.map(function (c) { return c.memAvgMB && c.memAvgMB.mean; })), 0, ' Mo') }),
+        el('td', { text: fmt(mean(perf.map(function (c) { return c.loadTimeMs && c.loadTimeMs.median; })), 0, ' ms') }),
+        el('td', { text: fmt(mean(perf.map(function (c) { return c.memAvgMB && c.memAvgMB.mean; })), 0, ' Mo') }),
         el('td', { text: peak ? fmt(peak, 0, ' Mo') : '—' }),
-        el('td', { text: fmt(mean(own.map(function (c) { return c.cpuAvgPercent && c.cpuAvgPercent.mean; })), 0, ' %') }),
-        el('td', { text: fmt(mean(own.map(function (c) { return c.networkMB && c.networkMB.mean; })), 2, ' Mo'), title: 'Mo téléchargés par page distante, mesurés par le proxy' }),
-        el('td', { text: pct(mean(own.map(function (c) { return c.fidelity && c.fidelity.similarity; }))), title: 'similarité moyenne du DOM avec le consensus des navigateurs' })
+        el('td', { text: fmt(mean(perf.map(cpuSecondsOfCell)), 2, ' s'), title: 'secondes de processeur consommées par page (médiane par cible, moyennée)' }),
+        el('td', { text: fmt(mean(perf.map(function (c) { return c.networkMB && c.networkMB.mean; })), 2, ' Mo'), title: 'Mo téléchargés par page distante, mesurés par le proxy' }),
+        el('td', { text: pct(mean(perf.map(function (c) { return c.content && c.content.score; }))), title: 'éléments attendus retrouvés sur les pages locales' }),
+        el('td', { text: pct(mean(perf.map(function (c) { return c.fidelity && c.fidelity.similarity; }))), title: 'similarité moyenne du DOM avec celui sur lequel les moteurs s’accordent' })
       ]));
     });
     if (!body.children.length) body.appendChild(el('tr', {}, [el('td', { class: 'empty', colspan: String(head.length), text: 'Aucune donnée pour cette sélection' })]));
@@ -664,9 +683,14 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     { key: 'launch', label: 'Lancement', dir: 1, value: function (c) { return stat(c.launchTimeMs, 'median'); }, render: function (c) { return el('td', { text: fmt(stat(c.launchTimeMs, 'median'), 0, ' ms') }); } },
     { key: 'memAvg', label: 'RAM moy.', dir: 1, value: function (c) { return stat(c.memAvgMB, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.memAvgMB, 'mean'), 0, ' Mo') }); } },
     { key: 'memPeak', label: 'RAM pic', dir: 1, value: function (c) { return stat(c.memPeakMB, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.memPeakMB, 'mean'), 0, ' Mo') }); } },
+    { key: 'cpuSec', label: 'CPU (s)', dir: 1, value: cpuSecondsOfCell, render: function (c) { return el('td', { title: 'secondes de processeur consommées par run (médiane)', text: fmt(cpuSecondsOfCell(c), 2, ' s') }); } },
     { key: 'cpuAvg', label: 'CPU moy.', dir: 1, value: function (c) { return stat(c.cpuAvgPercent, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.cpuAvgPercent, 'mean'), 0, ' %') }); } },
     { key: 'cpuPeak', label: 'CPU pic', dir: 1, value: function (c) { return stat(c.cpuPeakPercent, 'mean'); }, render: function (c) { return el('td', { text: fmt(stat(c.cpuPeakPercent, 'mean'), 0, ' %') }); } },
     { key: 'network', label: 'Réseau', dir: 1, value: function (c) { return stat(c.networkMB, 'median'); }, render: function (c) { return el('td', { text: c.networkMB ? fmt(c.networkMB.median, 2, ' Mo') : '—' }); } },
+    { key: 'content', label: 'Contenu', dir: -1, value: function (c) { return c.content ? c.content.score : null; }, render: function (c) {
+      var ct = c.content;
+      return el('td', { title: ct ? ct.checks.map(function (k) { return k.selector + ' : ' + k.foundMedian + ' / ' + k.expected; }).join('\n') : 'la page ne déclare pas de contenu attendu', text: ct ? ct.checks.map(function (k) { return fmt(k.foundMedian, 0) + '/' + fmt(k.expected, 0); }).join(' · ') : '—' });
+    } },
     { key: 'fidelity', label: 'DOM similaire', dir: -1, value: function (c) { return stat(c.fidelity, 'similarity'); }, render: function (c) {
       var f = c.fidelity;
       return el('td', { title: f ? 'structure identique au consensus dans ' + pct(f.matchRate) + ' des runs' + (f.distinctHashes > 1 ? ', ' + f.distinctHashes + ' variantes' : '') : '', text: f ? pct(typeof f.similarity === 'number' ? f.similarity : f.matchRate) : '—' });
@@ -895,7 +919,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     replaceChart('drill-mem', lineConfig(1, ' Mo'));
     replaceChart('drill-cpu', lineConfig(2, ' %'));
     info.textContent = series
-      ? (series.success ? 'chargé en ' + fmt(series.loadTimeMs, 0, ' ms') : 'run en échec') + ' · ' + series.samples.length + ' échantillons'
+      ? (series.success ? 'chargé en ' + fmt(series.loadTimeMs, 0, ' ms') : 'run en échec') + (num(series.cpuSec) ? ' · ' + fmt(series.cpuSec, 2, ' s de CPU') : '') + ' · ' + series.samples.length + ' échantillons'
       : 'Aucune série RAM/CPU pour cette sélection';
   }
 
@@ -922,26 +946,27 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     { key: 'antibot', label: 'Anti-bot', kind: 'absolute', help: 'part des contrôles de détection réussis, même quand le navigateur finit repéré',
       value: function (runs) { return meanOf(runs.map(function (r) { return r.abScore; })); },
       raw: function (v) { return fmt(v * 100, 0, ' % des contrôles'); } },
-    { key: 'speed', label: 'Vitesse', kind: 'relative', help: 'temps de chargement médian (début de navigation → load)',
+    { key: 'speed', label: 'Vitesse', kind: 'relative', scope: 'perf', help: 'temps de chargement médian (début de navigation → load)',
       value: function (runs) { return median(runs.filter(function (r) { return r.success; }).map(function (r) { return r.loadTimeMs; })); },
       raw: function (v) { return fmt(v, 0, ' ms'); } },
     { key: 'launch', label: 'Démarrage', kind: 'relative', help: 'temps de lancement du navigateur',
       value: function (runs) { return median(runs.map(function (r) { return r.launchMs; })); },
       raw: function (v) { return fmt(v, 0, ' ms'); } },
-    { key: 'memory', label: 'Mémoire', kind: 'relative', help: 'mémoire moyenne pendant le run',
-      value: function (runs) { return meanOf(runs.map(function (r) { return r.memAvgMB; })); },
+    { key: 'memory', label: 'Mémoire', kind: 'relative', scope: 'perf', help: 'mémoire au pic pendant le chargement (médiane des runs)',
+      value: function (runs) { return median(runs.map(function (r) { return num(r.memPeakMB) ? r.memPeakMB : r.memAvgMB; })); },
       raw: function (v) { return fmt(v, 0, ' Mo'); } },
-    // +5 points of CPU on both sides so a near-idle 0-1 % browser does not crush everyone else to 0.
-    { key: 'cpu', label: 'CPU', kind: 'relative', epsilon: 5, help: 'CPU moyen, en % d’un cœur',
-      value: function (runs) { return meanOf(runs.map(function (r) { return r.cpuAvg; })); },
-      raw: function (v) { return fmt(v, 0, ' %'); } },
-    { key: 'network', label: 'Réseau', kind: 'relative', epsilon: 0.05, help: 'Mo téléchargés par page (pages distantes, mesurés par le proxy)',
+    // CPU seconds per page: an average % would favour browsers that take longer. +0.1 s on both
+    // sides so a near-idle browser does not crush everyone else to 0.
+    { key: 'cpu', label: 'CPU', kind: 'relative', scope: 'perf', epsilon: 0.1, help: 'secondes de processeur consommées par page (médiane des runs)',
+      value: function (runs) { return median(runs.map(function (r) { return r.cpuSec; })); },
+      raw: function (v) { return fmt(v, 2, ' s CPU'); } },
+    { key: 'network', label: 'Réseau', kind: 'relative', scope: 'perf', epsilon: 0.05, help: 'Mo téléchargés par page (pages distantes, mesurés par le proxy)',
       value: function (runs) { return median(runs.filter(function (r) { return r.success; }).map(function (r) { return r.bytesDownMB; })); },
       raw: function (v) { return fmt(v, 2, ' Mo'); } },
-    { key: 'fidelity', label: 'Fidélité DOM', kind: 'absolute', help: 'similarité du DOM avec celui que construisent la plupart des navigateurs (nombre d’éléments par balise)',
-      value: function (runs) { return meanOf(runs.map(function (r) { return r.domSimilarity; })); },
-      raw: function (v) { return pct(v) + ' similaire'; } },
-    { key: 'visual', label: 'Rendu visuel', kind: 'absolute', help: 'pixels identiques à la capture du navigateur de référence (pages locales)',
+    { key: 'fidelity', label: 'Fidélité DOM', kind: 'absolute', scope: 'perf', help: 'pages locales : contenu attendu retrouvé ; autres pages : similarité du DOM avec celui sur lequel les moteurs s’accordent',
+      value: function (runs) { return meanOf(runs.map(function (r) { return num(r.contentScore) ? r.contentScore : r.domSimilarity; })); },
+      raw: function (v) { return pct(v) + ' conforme'; } },
+    { key: 'visual', label: 'Rendu visuel', kind: 'absolute', scope: 'perf', help: 'pixels identiques à la capture du navigateur de référence (pages locales)',
       value: function (runs, cell) { return cell.visual ? cell.visual.similarity : null; },
       raw: function (v) { return pct(v) + ' des pixels'; } },
     { key: 'reliability', label: 'Fiabilité', kind: 'absolute', help: 'part des runs réussis (chargement + capture)',
@@ -960,7 +985,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   // of the table and their weight is disabled, instead of showing a column of "n/d".
   var MEASURED = {};
   AXES.forEach(function (a) {
-    MEASURED[a.key] = data.cells.some(function (c) { return num(a.value(c.series || [], c)); });
+    MEASURED[a.key] = data.cells.some(function (c) { return (a.scope !== 'perf' || isPerfCell(c)) && num(a.value(c.series || [], c)); });
   });
   function measuredAxes() { return AXES.filter(function (a) { return MEASURED[a.key]; }); }
 
@@ -986,6 +1011,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       browsers.forEach(function (b) { acc[b] = { scores: [], raws: [] }; });
       targets.forEach(function (t) {
         var entries = [];
+        if (axis.scope === 'perf' && ANTIBOT_TARGET[t]) return;
         browsers.forEach(function (b) {
           var cell = byKey[b + '\u0000' + t];
           if (!cell) return;
@@ -1093,7 +1119,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       var out = el('output', { for: 'w-' + a.key });
       input.addEventListener('input', function () {
         weights[a.key] = Number(input.value);
-        onWeightsChanged();
+        onWeightsChanged(true);
       });
       if (!MEASURED[a.key]) input.disabled = true;
       box.appendChild(el('label', {
@@ -1116,10 +1142,14 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     });
   }
 
-  function onWeightsChanged() {
+  // Each render redoes the 200-round bootstrap: while a slider is dragged, render once it settles.
+  var rankingTimer = null;
+  function onWeightsChanged(dragging) {
     syncWeightInputs();
     try { localStorage.setItem('bench-weights-v2', JSON.stringify(weights)); } catch (e) { /* ignore */ }
-    renderRanking();
+    clearTimeout(rankingTimer);
+    if (dragging) rankingTimer = setTimeout(renderRanking, 150);
+    else renderRanking();
   }
 
   function scoreCellStyle(score) {
@@ -1226,7 +1256,15 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     if (ranking.rows.some(function (r) { return familyOf(r.browser) === 'lightpanda'; })) {
       notes.push('Lightpanda n’a pas de moteur de rendu : il ne télécharge ni images ni CSS. Pour le comparer à armes égales, regarder les variantes « lite » (campagne avec --modes=full,lite), qui bloquent aussi ces ressources.');
     }
-    if (data.memoryMetrics.length > 1) notes.push('Mémoire : private working set (Windows) et USS (WSL), deux mesures de la mémoire propre au navigateur.');
+    var envPlatform = (data.environment || {}).platform;
+    if (envPlatform === 'win32' && ranking.rows.some(function (r) { return familyOf(r.browser) === 'lightpanda'; })) {
+      notes.push('Sous Windows, Lightpanda (pas de version Windows) tourne dans WSL2 : son démarrage et ses requêtes traversent la VM, ce qui le désavantage sur la vitesse et le démarrage. Une campagne sous Linux le compare à armes égales.');
+    }
+    if (data.memoryMetrics.length > 1) notes.push('Mémoire : private working set (Windows) et USS (Linux/WSL), deux mesures de la mémoire propre au navigateur.');
+    if (ranking.rows.some(function (r) { return r.browser.indexOf('puppeteer-stealth') === 0; })) {
+      notes.push('puppeteer-stealth utilise puppeteer-extra-plugin-stealth, sans nouvelle version depuis 2023 : c’est la référence furtive la plus répandue, pas la plus à jour.');
+    }
+    notes.push('Tous les drivers Chromium (Puppeteer, Playwright, Selenium, variantes furtives) lancent la même build de Chrome : les écarts entre eux viennent du driver.');
     notes.push('★ = meilleur sur l’axe (pas d’étoile en cas d’égalité). Un axe à poids 0 est grisé et ne compte pas dans le score global ; « n/d » = pas mesuré pour ce navigateur, l’axe est alors ignoré dans son score.');
     document.getElementById('ranking-notes').textContent = notes.join(' ');
   }
@@ -1242,9 +1280,13 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     document.getElementById('tp-empty').hidden = !none;
     document.getElementById('tp-content').hidden = none;
     if (none) return;
-    var tests = (data.throughput || []).filter(function (t) { return state.browsers.has(t.browser) || data.browsers.indexOf(t.browser) < 0; });
-    var info = document.getElementById('tp-target');
-    info.textContent = tests.length ? tests.map(function (t) { return t.target; }).filter(function (v, i, a) { return a.indexOf(v) === i; }).join(', ') : 'aucun test';
+    var all = (data.throughput || []).filter(function (t) { return state.browsers.has(t.browser) || data.browsers.indexOf(t.browser) < 0; });
+    var tpTargets = all.map(function (t) { return t.target; }).filter(function (v, i, a) { return a.indexOf(v) === i; });
+    var tpSelect = document.getElementById('tp-target-select');
+    fillSelect(tpSelect, tpTargets);
+    document.getElementById('tp-controls').hidden = tpTargets.length < 2;
+    var tests = all.filter(function (t) { return t.target === tpSelect.value; });
+    document.getElementById('tp-target').textContent = tpTargets.length ? tpTargets.join(', ') : 'aucun test';
     var levels = [];
     tests.forEach(function (t) { t.levels.forEach(function (l) { if (levels.indexOf(l.concurrency) < 0) levels.push(l.concurrency); }); });
     levels.sort(function (a, b) { return a - b; });
@@ -1281,7 +1323,8 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     tests.slice().sort(function (a, b) { return (b.bestPagesPerMinute || 0) - (a.bestPagesPerMinute || 0); }).forEach(function (t) {
       var failures = t.levels.reduce(function (s, l) { return s + (l.pages - l.successes); }, 0);
       var failedLevels = t.levels.filter(function (l) { return l.errors && l.errors.length; });
-      var problem = t.error || (failedLevels.length ? 'dès ' + failedLevels[0].concurrency + ' page(s) en parallèle : ' + failedLevels[0].errors[0] : '');
+      var problem = t.error || (failedLevels.length ? 'dès ' + failedLevels[0].concurrency + ' page(s) en parallèle : ' + failedLevels[0].errors[0] : '')
+        + (t.stoppedAfter ? ' (paliers suivants non testés : la plupart des chargements échouaient)' : '');
       body.appendChild(el('tr', {}, [
         el('td', {}, [browserLabel(t.browser, t.browserVersion)]),
         el('td', { class: 'left', text: t.target }),
@@ -1298,8 +1341,11 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   // ---------- history ----------
   var HISTORY_METRICS = [
     { key: 'meanLoadTimeMs', label: 'Chargement moyen', unit: ' ms', scale: 1 },
+    { key: 'memPeakMB', label: 'Mémoire au pic', unit: ' Mo', scale: 1 },
     { key: 'memAvgMB', label: 'Mémoire moyenne', unit: ' Mo', scale: 1 },
+    { key: 'cpuSeconds', label: 'CPU par page', unit: ' s', scale: 1, digits: 2 },
     { key: 'cpuAvgPercent', label: 'CPU moyen', unit: ' %', scale: 1 },
+    { key: 'contentScore', label: 'Contenu attendu', unit: ' %', scale: 100 },
     { key: 'antiBotScore', label: 'Contrôles anti-bot réussis', unit: ' %', scale: 100 },
     { key: 'antiBotPassRate', label: 'Pages anti-bot passées', unit: ' %', scale: 100 },
     { key: 'fidelitySimilarity', label: 'Fidélité DOM', unit: ' %', scale: 100 },
@@ -1311,6 +1357,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     HISTORY_METRICS.forEach(function (m) { select.appendChild(el('option', { value: m.key, text: m.label })); });
     select.addEventListener('change', function () { renderHistory(); });
   })();
+  document.getElementById('tp-target-select').addEventListener('change', function () { renderThroughput(); });
 
   function renderHistory() {
     var history = data.history || [];
@@ -1329,7 +1376,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     options.plugins.tooltip.callbacks = {
       label: function (ctx) {
         var entry = history[ctx.dataIndex].browsers.find(function (b) { return b.browser === ctx.dataset.label; });
-        return ctx.dataset.label + ' : ' + fmt(ctx.parsed.y, 0, metric.unit) + (entry && entry.version ? ' (' + entry.version + ')' : '');
+        return ctx.dataset.label + ' : ' + fmt(ctx.parsed.y, metric.digits || 0, metric.unit) + (entry && entry.version ? ' (' + entry.version + ')' : '');
       }
     };
     options.scales.y.title = { display: true, text: metric.label + ' (' + metric.unit.trim() + ')', color: css('--text-muted') };

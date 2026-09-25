@@ -4,12 +4,14 @@ import { sleep } from '../util/time.js';
 import type {
   AdapterDefinition,
   BrowserAdapter,
+  Engine,
   LaunchOptions,
   LaunchResult,
   NavigateOptions,
   NavigationResult,
   PageHandle,
 } from './base.js';
+import { benchChromeAvailability, benchChromePath } from './chrome.js';
 import { BLOCKED_RESOURCE_TYPES, completeNavigation, failedNavigation } from './common.js';
 
 /**
@@ -111,23 +113,31 @@ export function proxyOption(options: LaunchOptions) {
   return options.proxyUrl ? { server: options.proxyUrl } : undefined;
 }
 
+/** Chromium runs the shared benchmark Chrome build (see chrome.ts), not Playwright's chrome-headless-shell. */
 export function playwrightEngine(browserType: BrowserType): PlaywrightEngine {
   return {
-    launchServer: (options) => browserType.launchServer({ headless: true, proxy: proxyOption(options) }),
+    launchServer: async (options) => browserType.launchServer({
+      headless: true,
+      executablePath: browserType.name() === 'chromium' ? await benchChromePath() : undefined,
+      proxy: proxyOption(options),
+    }),
     connect: (wsEndpoint) => browserType.connect(wsEndpoint),
   };
 }
 
 const ENGINES = { chromium, firefox, webkit } satisfies Record<string, BrowserType>;
+const ENGINE_FAMILY: Record<keyof typeof ENGINES, Engine> = { chromium: 'chromium', firefox: 'gecko', webkit: 'webkit' };
 
 export function playwrightDefinition(engineName: keyof typeof ENGINES): AdapterDefinition {
   const name = `playwright-${engineName}`;
   const browserType = ENGINES[engineName];
   return {
     name,
-    description: `Playwright ${engineName} (headless)`,
+    description: engineName === 'chromium' ? 'Playwright driving the benchmark Chrome build (headless)' : `Playwright ${engineName} (headless)`,
+    engine: ENGINE_FAMILY[engineName],
     create: () => new PlaywrightAdapter(name, async () => playwrightEngine(browserType)),
     async checkAvailability() {
+      if (engineName === 'chromium') return benchChromeAvailability();
       return existsSync(browserType.executablePath())
         ? { available: true }
         : { available: false, reason: `${engineName} not installed (run "npm run install-browsers")` };

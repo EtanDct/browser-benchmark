@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { resolveAdapters } from '../src/adapters/registry.js';
-import { loadTargets, selectTargets } from '../src/config/targets.js';
+import { isAntiBotTarget, loadTargets, selectTargets } from '../src/config/targets.js';
 
 function writeConfig(main: unknown, local?: unknown): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'bench-config-'));
@@ -25,6 +25,18 @@ describe('targets config', () => {
     assert.equal(targets[0].settleMs, 1000);
     assert.equal(targets[1].url, 'https://private.test');
     assert.equal(targets[1].antiBot?.evaluator, 'cloudflare');
+  });
+
+  it('reads runs per target, with a default of 10', () => {
+    const targets = loadTargets(writeConfig({
+      targets: [
+        { name: 'a', group: 'antibot', url: 'https://a.test', runs: 3, antiBot: { evaluator: 'cloudflare' } },
+        { name: 'b', group: 'perf', url: 'https://b.test' },
+      ],
+    }));
+    assert.deepEqual(targets.map((t) => t.runs), [3, 10]);
+    assert.deepEqual(targets.map(isAntiBotTarget), [true, false]);
+    assert.throws(() => loadTargets(writeConfig({ targets: [{ name: 'a', group: 'g', url: 'https://x.test', runs: 0 }] })), /runs must be/);
   });
 
   it('rejects names that are unsafe in file names and unknown evaluators', () => {

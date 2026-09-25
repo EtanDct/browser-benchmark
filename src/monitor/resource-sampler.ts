@@ -23,12 +23,15 @@ export interface ResourceSample {
   processCount: number;
 }
 
-/** private-working-set (Windows) and uss (Linux in WSL) both exclude shared pages; rss does not. */
+/** private-working-set (Windows) and uss (Linux, WSL) both exclude shared pages; rss (macOS) does not. */
 export type MemoryMetric = 'private-working-set' | 'uss' | 'rss';
 
 export interface TreeProbe {
   readonly memoryMetric: MemoryMetric;
+  /** False once a long-lived sampler process has died: its runs would silently get no samples. */
+  readonly alive: boolean;
   start(): Promise<void>;
+  restart(): Promise<void>;
   track(pid: number, onSample: (sample: RawSample) => void): void;
   untrack(): void;
   dispose(): Promise<void>;
@@ -42,16 +45,21 @@ export interface ResourceSummary {
   memBytes: MinMaxAvg | null;
   cpuPercent: MinMaxAvg | null;
   peakProcessCount: number;
+  /** CPU time consumed by the tree during the window (sum over samples of cpu% x interval), in seconds. Absent in older records. */
+  cpuSeconds?: number | null;
 }
 
-/** Linux/macOS: process tree from `ps`, per-process RSS/CPU from pidusage. */
+/** macOS (no /proc), or Linux without python3: process tree from `ps`, per-process RSS/CPU from pidusage. */
 class UnixTreeProbe implements TreeProbe {
   readonly memoryMetric = 'rss' as const;
+  readonly alive = true;
   private generation = 0;
 
   constructor(private intervalMs: number) {}
 
   async start(): Promise<void> {}
+
+  async restart(): Promise<void> {}
 
   track(pid: number, onSample: (sample: RawSample) => void): void {
     const generation = ++this.generation;
@@ -97,9 +105,18 @@ class UnixTreeProbe implements TreeProbe {
   }
 }
 
+const LINUX_SAMPLER = fileURLToPath(new URL('./linux-sampler.py', import.meta.url));
+
+/** Same sampler on a Linux host: USS, comparable with Windows' private working set. */
+function createLinuxProbe(intervalMs: number): TreeProbe {
+  return new LineProtocolProbe('uss', 'Linux', () =>
+    spawn('python3', [LINUX_SAMPLER, String(intervalMs)], { stdio: ['pipe', 'pipe', 'pipe'] }),
+  );
+}
+
 /** Browsers hosted in WSL are invisible from Windows (only wsl.exe shows): sample them from inside. */
 async function createWslProbe(intervalMs: number): Promise<TreeProbe> {
-  const script = await toWslPath(fileURLToPath(new URL('./wsl-sampler.py', import.meta.url)));
+  const script = await toWslPath(LINUX_SAMPLER);
   return new LineProtocolProbe('uss', 'WSL', () =>
     spawn('wsl.exe', [...wslDistroArgs(), '-e', 'python3', script, String(intervalMs)], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -119,12 +136,28 @@ export class ResourceSampler {
   private constructor(private probe: TreeProbe) {}
 
   static async create(intervalMs: number, location: ProcessLocation = 'host'): Promise<ResourceSampler> {
-    let probe: TreeProbe;
-    if (location === 'wsl') probe = await createWslProbe(intervalMs);
-    else if (process.platform === 'win32') probe = createWindowsProbe(intervalMs);
-    else probe = new UnixTreeProbe(intervalMs);
+    if (location === 'wsl') return ResourceSampler.started(await createWslProbe(intervalMs));
+    if (process.platform === 'win32') return ResourceSampler.started(createWindowsProbe(intervalMs));
+    if (process.platform === 'linux') {
+      try {
+        return await ResourceSampler.started(createLinuxProbe(intervalMs));
+      } catch {
+        // No python3: fall back to ps + pidusage (RSS).
+      }
+    }
+    return ResourceSampler.started(new UnixTreeProbe(intervalMs));
+  }
+
+  private static async started(probe: TreeProbe): Promise<ResourceSampler> {
     await probe.start();
     return new ResourceSampler(probe);
+  }
+
+  /** Restarts a sampler process that died mid-campaign. Returns true when it had to. */
+  async ensureAlive(): Promise<boolean> {
+    if (this.probe.alive) return false;
+    await this.probe.restart();
+    return true;
   }
 
   get memoryMetric(): MemoryMetric {
@@ -164,6 +197,22 @@ function minMaxAvg(values: number[]): MinMaxAvg | null {
   return { min, max, avg: sum / values.length };
 }
 
+/**
+ * CPU time the tree consumed: each sample's cpu% covers the interval since the previous sample.
+ * Unlike an average %, it does not depend on how long the window stays open after the work is done.
+ */
+export function cpuSecondsOf(samples: Array<Pick<ResourceSample, 't' | 'cpuPercent'>>): number | null {
+  let seconds = 0;
+  let measured = false;
+  for (let i = 1; i < samples.length; i++) {
+    const cpu = samples[i].cpuPercent;
+    if (cpu === null) continue;
+    seconds += ((cpu / 100) * (samples[i].t - samples[i - 1].t)) / 1000;
+    measured = true;
+  }
+  return measured ? Math.round(seconds * 1000) / 1000 : null;
+}
+
 export function summarizeSamples(samples: ResourceSample[], memoryMetric: MemoryMetric): ResourceSummary {
   // Samples taken after the tree died (processCount 0) would drag the averages down.
   const alive = samples.filter((s) => s.processCount > 0);
@@ -173,5 +222,6 @@ export function summarizeSamples(samples: ResourceSample[], memoryMetric: Memory
     memBytes: minMaxAvg(alive.map((s) => s.memBytes)),
     cpuPercent: minMaxAvg(alive.flatMap((s) => (s.cpuPercent === null ? [] : [s.cpuPercent]))),
     peakProcessCount: alive.reduce((max, s) => Math.max(max, s.processCount), 0),
+    cpuSeconds: cpuSecondsOf(samples),
   };
 }

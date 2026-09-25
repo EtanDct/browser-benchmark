@@ -11,6 +11,8 @@ export interface ThroughputLevel {
   memAvgMB: number | null;
   memPeakMB: number | null;
   cpuAvgPercent: number | null;
+  /** CPU time the browser spent per successful page load. */
+  cpuSecondsPerPage?: number | null;
   /** First distinct failure messages at this level. */
   errors?: string[];
 }
@@ -25,6 +27,8 @@ export interface ThroughputRecord {
   startedAt: string;
   memoryMetric: MemoryMetric | null;
   levels: ThroughputLevel[];
+  /** Concurrency after which higher levels were skipped because most loads failed. */
+  stoppedAfter?: number;
   error?: string;
   environment: EnvironmentInfo;
 }
