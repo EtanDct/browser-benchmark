@@ -10,6 +10,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { swallowedByNpm, swallowedOptionsError } from '../src/cli-options.js';
 import { toWslPath, wslDistroArgs, wslShell } from '../src/util/wsl.js';
 
 const HELP = `Usage, from Windows:
@@ -56,6 +57,9 @@ async function main(): Promise<void> {
     return;
   }
   if (process.platform !== 'win32') throw new Error('npm run wsl is for Windows: under Linux, run npm run <script> directly');
+  // npm's environment does not reach WSL: the CLI there could not notice the options npm kept.
+  const swallowed = swallowedByNpm();
+  if (swallowed.length) throw swallowedOptionsError(swallowed);
 
   const home = await wslShell('echo $HOME');
   const dest = process.env.BENCH_WSL_DIR || `${home}/browser-benchmark`;
