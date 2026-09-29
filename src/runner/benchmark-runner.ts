@@ -8,7 +8,7 @@ import { isAntiBotTarget, type Target } from '../config/targets.js';
 import { summarizeSamples, type ResourceSampler } from '../monitor/resource-sampler.js';
 import { killTree } from '../util/proc.js';
 import { errorMessage, sleep, TimeoutError, withTimeout } from '../util/time.js';
-import { wslKill } from '../util/wsl.js';
+import { insideWsl, wslKill } from '../util/wsl.js';
 import { prepareRuntime, type Runtime } from './runtime.js';
 import { RUN_SCHEMA_VERSION, type EnvironmentInfo, type RunMode, type RunRecord } from './types.js';
 
@@ -65,6 +65,7 @@ export function environmentInfo(): EnvironmentInfo {
     cpuCount: cpus.length,
     totalMemBytes: os.totalmem(),
     nodeVersion: process.version,
+    ...(insideWsl() ? { wsl: true } : {}),
   };
 }
 
@@ -186,13 +187,14 @@ async function executeRun(ctx: RunContext): Promise<RunRecord> {
   let pid: number | null = null;
   let location: ProcessLocation = 'host';
   let sampler: ResourceSampler | undefined;
+  let navigating = false;
 
   try {
     const launchStart = Date.now();
     const launched = await withTimeout(adapter.launch({ proxyUrl: proxy?.url }), options.launchTimeoutMs, 'launch');
     pid = launched.pid;
     location = launched.location ?? 'host';
-    record.launchTimeMs = Date.now() - launchStart;
+    record.launchTimeMs = launched.launchTimeMs ?? Date.now() - launchStart;
     record.browserVersion = await withTimeout(adapter.version?.() ?? Promise.resolve('unknown'), 5_000, 'version').catch(() => 'unknown');
 
     if (pid !== null) {
@@ -208,6 +210,7 @@ async function executeRun(ctx: RunContext): Promise<RunRecord> {
     };
     const hardLimit = target.timeoutMs + target.settleMs + navOptions.challengeWaitMs + HARD_TIMEOUT_MARGIN_MS;
     proxy?.reset();
+    navigating = true;
     record.navigation = await withTimeout(adapter.navigate(ctx.url, navOptions), hardLimit, 'navigation');
     if (proxy) record.network = proxy.read();
   } catch (err) {
@@ -215,6 +218,9 @@ async function executeRun(ctx: RunContext): Promise<RunRecord> {
     record.timedOut = err instanceof TimeoutError;
     record.navigation = { ...record.navigation, success: false, errorMessage: record.navigation.errorMessage ?? record.error };
   } finally {
+    // Before the navigation, the counts and errors still belong to the previous run.
+    const proxyErrors = navigating ? proxy?.errors() ?? [] : [];
+    if (proxyErrors.length) record.proxyErrors = proxyErrors;
     if (sampler) {
       const samples = sampler.end();
       record.resources = {
@@ -249,7 +255,10 @@ async function executeRun(ctx: RunContext): Promise<RunRecord> {
 function formatRunLine(record: RunRecord, position: string): string {
   const nav = record.navigation;
   const head = `${position} [${record.browser}] ${record.target} ${record.run > 0 ? `#${record.run}` : '(chauffe)'}`;
-  if (!nav.success) return `${head}  FAIL  ${record.error ?? nav.errorMessage ?? 'unknown error'}`;
+  if (!nav.success) {
+    const proxy = record.proxyErrors ? `  (proxy: ${record.proxyErrors.join(', ')})` : '';
+    return `${head}  FAIL  ${record.error ?? nav.errorMessage ?? 'unknown error'}${proxy}`;
+  }
   const parts = [`${head}  ok  ${nav.loadTimeMs}ms`];
   if (nav.httpStatus) parts.push(`HTTP ${nav.httpStatus}`);
   const summary = record.resources?.summary;

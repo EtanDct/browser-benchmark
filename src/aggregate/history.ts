@@ -84,5 +84,16 @@ export async function loadHistory(historyDir: string): Promise<HistoryEntry[]> {
     const entry = JSON.parse(await readFile(path.join(historyDir, file), 'utf8')) as HistoryEntry;
     if (entry.schemaVersion === 1) entries.push(entry);
   }
-  return entries.sort((a, b) => a.campaignAt.localeCompare(b.campaignAt));
+  return latestPerCampaign(entries);
+}
+
+/**
+ * A campaign resumed (--resume) or split over several commands (same --campaign) writes one entry per
+ * command, each summarizing every run of the campaign so far: only the latest one counts.
+ */
+export function latestPerCampaign(entries: HistoryEntry[]): HistoryEntry[] {
+  const sorted = [...entries].sort((a, b) => a.campaignAt.localeCompare(b.campaignAt));
+  const last = new Map<string, HistoryEntry>();
+  for (const entry of sorted) if (entry.campaign) last.set(entry.campaign, entry);
+  return sorted.filter((entry) => !entry.campaign || last.get(entry.campaign) === entry);
 }

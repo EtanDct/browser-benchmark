@@ -10,6 +10,7 @@ import { appendHistory } from './aggregate/history.js';
 import { computeVisualScores } from './aggregate/visual.js';
 import { loadTargets, selectTargets } from './config/targets.js';
 import { generateDashboard } from '../dashboard/generate-dashboard.js';
+import { CLI_OPTIONS, swallowedByNpm, swallowedOptionsError } from './cli-options.js';
 import { runCampaign, type RunOrder } from './runner/benchmark-runner.js';
 import { runThroughput } from './runner/throughput-runner.js';
 import type { RunMode, RunRecord } from './runner/types.js';
@@ -41,6 +42,7 @@ Bench options:
   --timeout=<ms>        override every target's navigation timeout
   --config=<file>       targets file                                                   [config/targets.json]
   --results=<dir>       results directory                                                          [results]
+  --dashboard=<file>    generated dashboard      [dashboard/index.html, or <results>/dashboard.html with --results]
   --clean               delete every previous result (raw runs, screenshots, throughput) first
 
   Without --resume, the (browser, target) pairs of the campaign replace their previous runs; other
@@ -86,39 +88,19 @@ async function aggregateResults(resultsDir: string): Promise<{ file: string; rep
 }
 
 async function main(): Promise<void> {
-  const { values, positionals } = parseArgs({
-    allowPositionals: true,
-    options: {
-      browsers: { type: 'string', default: 'all' },
-      targets: { type: 'string', default: 'all' },
-      target: { type: 'string', default: 'local-heavy-js,local-spa' },
-      runs: { type: 'string' },
-      warmup: { type: 'string', default: '1' },
-      order: { type: 'string', default: 'interleaved' },
-      modes: { type: 'string', default: 'full' },
-      'no-bytes': { type: 'boolean', default: false },
-      'no-screenshots': { type: 'boolean', default: false },
-      'no-history': { type: 'boolean', default: false },
-      campaign: { type: 'string' },
-      resume: { type: 'boolean', default: false },
-      concurrency: { type: 'string', default: '1,2,4,8' },
-      pages: { type: 'string' },
-      pause: { type: 'string', default: '2000' },
-      interval: { type: 'string', default: '200' },
-      timeout: { type: 'string' },
-      config: { type: 'string', default: 'config/targets.json' },
-      results: { type: 'string', default: 'results' },
-      clean: { type: 'boolean', default: false },
-      help: { type: 'boolean', short: 'h', default: false },
-    },
-  });
+  // Running on npm's defaults instead of the options typed would replace results: refuse.
+  const swallowed = swallowedByNpm();
+  if (swallowed.length) throw swallowedOptionsError(swallowed);
+  const { values, positionals } = parseArgs({ allowPositionals: true, options: CLI_OPTIONS });
   const command = positionals[0] ?? 'bench';
   if (values.help) {
     console.log(HELP);
     return;
   }
   const resultsDir = path.resolve(values.results);
-  const dashboardFile = path.resolve('dashboard/index.html');
+  // Another results directory gets its own dashboard: a test run must not overwrite the main one.
+  const dashboardFile = path.resolve(values.dashboard
+    ?? (resultsDir === path.resolve('results') ? 'dashboard/index.html' : path.join(resultsDir, 'dashboard.html')));
   const historyDir = path.join(resultsDir, 'history');
 
   if (command === 'list') {

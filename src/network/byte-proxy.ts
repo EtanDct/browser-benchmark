@@ -16,9 +16,23 @@ export interface ByteCounts {
 export interface ByteProxy {
   /** Proxy URL as seen from this machine. */
   url: string;
+  /** Clears the byte counts and the upstream errors. */
   reset(): void;
   read(): ByteCounts;
+  /** Upstream connections the proxy could not open since reset(), as "host:port CODE". */
+  errors(): string[];
   close(): Promise<void>;
+}
+
+/**
+ * Node's happy eyeballs gives each address 250 ms by default, then abandons it for the next one, where
+ * browsers keep the first attempt racing. Without IPv6 (WSL's NAT), a busy machine then lost ~0.5% of
+ * tunnels once both IPv4 attempts were cut short: the browser got an empty response and the run failed.
+ */
+const ATTEMPT_TIMEOUT_MS = 2_000;
+
+function errorCode(err: Error & { code?: string; errors?: Array<{ code?: string }> }): string {
+  return err.code || err.errors?.map((e) => e.code).filter(Boolean).join('+') || err.message;
 }
 
 /** "host:port" of a CONNECT request, IPv6 literals included ("[::1]:443"). */
@@ -31,7 +45,10 @@ export function connectTarget(authority: string): { host: string; port: number }
 const HOP_BY_HOP = new Set(['proxy-connection', 'proxy-authorization', 'connection', 'keep-alive', 'te', 'trailer', 'upgrade']);
 
 export async function startByteProxy(extraHosts: string[] = []): Promise<ByteProxy> {
+  // Process-wide: the proxy is the only thing here connecting to host names (drivers use IP literals).
+  net.setDefaultAutoSelectFamilyAttemptTimeout(ATTEMPT_TIMEOUT_MS);
   const counts: ByteCounts = { bytesDown: 0, bytesUp: 0 };
+  const upstreamErrors: string[] = [];
   const sockets = new Set<Socket>();
   const track = (socket: Socket) => {
     sockets.add(socket);
@@ -58,7 +75,13 @@ export async function startByteProxy(extraHosts: string[] = []): Promise<BytePro
         upstreamRes.pipe(res);
       },
     );
-    upstream.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
+    upstream.on('error', (err) => {
+      if (!res.headersSent) {
+        upstreamErrors.push(`${target.host} ${errorCode(err)}`);
+        res.writeHead(502);
+      }
+      res.end();
+    });
     req.on('data', (chunk: Buffer) => { counts.bytesUp += chunk.length; });
     req.pipe(upstream);
   };
@@ -70,7 +93,9 @@ export async function startByteProxy(extraHosts: string[] = []): Promise<BytePro
       client.end('HTTP/1.1 400 Bad Request\r\n\r\n');
       return;
     }
+    let established = false;
     const upstream = net.connect(target.port, target.host, () => {
+      established = true;
       client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       if (head.length) {
         counts.bytesUp += head.length;
@@ -84,9 +109,14 @@ export async function startByteProxy(extraHosts: string[] = []): Promise<BytePro
     upstream.on('data', (chunk: Buffer) => { counts.bytesDown += chunk.length; });
     const teardown = () => { client.destroy(); upstream.destroy(); };
     client.on('error', teardown);
-    upstream.on('error', teardown);
     client.on('close', teardown);
-    upstream.on('close', teardown);
+    upstream.on('error', (err) => {
+      if (established) return teardown();
+      // Answer the CONNECT, as a real proxy would: closing on the browser reads as an empty response.
+      upstreamErrors.push(`${req.url} ${errorCode(err)}`);
+      client.end('HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n');
+    });
+    upstream.on('close', () => { if (established) teardown(); });
   };
 
   const create = () => {
@@ -113,8 +143,9 @@ export async function startByteProxy(extraHosts: string[] = []): Promise<BytePro
 
   return {
     url: `http://127.0.0.1:${port}`,
-    reset: () => { counts.bytesDown = 0; counts.bytesUp = 0; },
+    reset: () => { counts.bytesDown = 0; counts.bytesUp = 0; upstreamErrors.length = 0; },
     read: () => ({ ...counts }),
+    errors: () => [...upstreamErrors],
     close: async () => {
       for (const socket of sockets) socket.destroy();
       await Promise.all(servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));

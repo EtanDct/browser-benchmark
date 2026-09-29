@@ -40,7 +40,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   const args = process.argv.slice(2);
   const artifact = args.includes('--artifact');
   const [aggregated = 'results/aggregated.json', out = artifact ? 'dashboard/artifact.html' : 'dashboard/index.html'] = args.filter((a) => !a.startsWith('--'));
-  generateDashboard(path.resolve(aggregated), path.resolve(out), { artifact, historyDir: path.resolve('results/history') })
+  generateDashboard(path.resolve(aggregated), path.resolve(out), { artifact, historyDir: path.resolve(path.dirname(aggregated), 'history') })
     .then((file) => console.log(`Dashboard -> ${file}`))
     .catch((err: Error) => {
       console.error(`Error: ${err.message}`);

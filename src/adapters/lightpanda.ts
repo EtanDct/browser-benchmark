@@ -1,4 +1,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer';
@@ -25,7 +28,7 @@ import { navigatePuppeteerPage, puppeteerPageHandle } from './puppeteer.js';
  *    "not planned", blocked on linking V8's MSVC runtime with Zig's MinGW one). Its CDP port is reached
  *    through WSL localhost forwarding and its RAM/CPU are sampled from inside WSL. With WSL's mirrored
  *    networking (.wslconfig: networkingMode=mirrored) both sides share 127.0.0.1 and no NAT hop is added.
- *  - Linux/macOS: the native binary (LIGHTPANDA_BIN or `lightpanda` on PATH).
+ *  - Linux/macOS: the native binary (LIGHTPANDA_BIN, `lightpanda` on PATH, or ~/.local/bin/lightpanda).
  */
 const execFileAsync = promisify(execFile);
 
@@ -53,23 +56,39 @@ function resolveMode(): Promise<Mode | { kind: 'missing'; reason: string }> {
       if (!hostIp) return { kind: 'missing', reason: 'could not determine the Windows host address from WSL' };
       return { kind: 'wsl', binary, hostIp };
     }
-    const binary = process.env.LIGHTPANDA_BIN || findOnPath('lightpanda');
+    const userBin = path.join(os.homedir(), '.local', 'bin', 'lightpanda');
+    const binary = process.env.LIGHTPANDA_BIN || findOnPath('lightpanda') || (existsSync(userBin) ? userBin : null);
     if (binary) return { kind: 'native', binary };
     return { kind: 'missing', reason: 'install it from https://github.com/lightpanda-io/browser/releases and put it on PATH or set LIGHTPANDA_BIN' };
   })();
   return resolvedMode;
 }
 
-/** `sh -c 'echo PID:$$; exec lightpanda ...'` prints the Linux PID before becoming Lightpanda. */
-function readWslPid(child: ChildProcess): Promise<number> {
-  return withTimeout(new Promise<number>((resolve, reject) => {
-    const lines = createInterface({ input: child.stdout! });
-    lines.once('line', (line) => {
-      const pid = Number(/^PID:(\d+)$/.exec(line.trim())?.[1]);
-      if (pid) resolve(pid);
-      else reject(new Error(`unexpected Lightpanda output: ${line}`));
-      // Keep draining so a chatty process never blocks on a full pipe.
-      child.stdout!.resume();
+/**
+ * Starts Lightpanda inside WSL and times its startup there, from exec to an open CDP port: from Windows,
+ * wsl.exe alone takes ~350 ms and the port forwarding lags behind, which would bury Lightpanda's ~40 ms.
+ * Prints PID:<linux pid>, then READY:<ms>. No double quotes: they do not survive Windows argv quoting.
+ */
+export function wslServeScript(binary: string, args: string[], port: number): string {
+  return [
+    'export LIGHTPANDA_DISABLE_TELEMETRY=true',
+    't0=${EPOCHREALTIME/./}',
+    `${binary} ${args.join(' ')} & p=$!`,
+    'echo PID:$p',
+    `until true 2>/dev/null </dev/tcp/127.0.0.1/${port}; do kill -0 $p 2>/dev/null || exit 1; sleep 0.005; done`,
+    'echo READY:$(( (${EPOCHREALTIME/./} - t0) / 1000 ))',
+    'wait $p',
+  ].join('; ');
+}
+
+function readWslStartup(child: ChildProcess, onPid: (pid: number) => void): Promise<{ pid: number; readyMs: number }> {
+  return withTimeout(new Promise<{ pid: number; readyMs: number }>((resolve, reject) => {
+    let pid = 0;
+    // Lines are read until the process exits, so a chatty process never blocks on a full pipe.
+    createInterface({ input: child.stdout! }).on('line', (line) => {
+      const [, key, value] = /^(PID|READY):(\d+)$/.exec(line.trim()) ?? [];
+      if (key === 'PID') onPid(pid = Number(value));
+      else if (key === 'READY' && pid) resolve({ pid, readyMs: Number(value) });
     });
     child.once('exit', (code) => reject(new Error(`Lightpanda exited early (code ${code})`)));
   }), 30_000, 'Lightpanda start in WSL');
@@ -92,30 +111,39 @@ class LightpandaAdapter implements BrowserAdapter {
 
     let endpoint: string;
     let result: LaunchResult;
+    let startupMs: number | undefined;
     if (mode.kind === 'external') {
       endpoint = mode.endpoint;
       result = { pid: null };
     } else {
       const port = await getFreePort();
-      const serve = ['serve', '--host', '127.0.0.1', '--port', String(port)];
+      // Workers and iframes are off by default: a page that computes in a worker or embeds a challenge
+      // iframe (Cloudflare Turnstile) would never show its result.
+      const serve = ['serve', '--host', '127.0.0.1', '--port', String(port), '--load-resources', 'worker', '--load-resources', 'iframe'];
       if (options.proxyUrl) serve.push('--http-proxy', this.reachable(options.proxyUrl));
       const server = mode.kind === 'wsl'
-        ? spawn('wsl.exe', [...wslDistroArgs(), '-e', 'sh', '-c', `echo PID:$$; LIGHTPANDA_DISABLE_TELEMETRY=true exec ${mode.binary} ${serve.join(' ')}`], {
+        ? spawn('wsl.exe', [...wslDistroArgs(), '-e', 'bash', '-c', wslServeScript(mode.binary, serve, port)], {
             stdio: ['ignore', 'pipe', 'ignore'],
             windowsHide: true,
           })
         : spawn(mode.binary, serve, { env: { ...process.env, LIGHTPANDA_DISABLE_TELEMETRY: 'true' }, stdio: 'ignore' });
       this.server = server;
-      if (mode.kind === 'wsl') this.wslPid = await readWslPid(server);
+      if (mode.kind === 'wsl') {
+        const started = await readWslStartup(server, (pid) => { this.wslPid = pid; });
+        startupMs = started.readyMs;
+      }
       await waitForPort(port, 30_000, () => server.exitCode === null);
       endpoint = `ws://127.0.0.1:${port}`;
       result = mode.kind === 'wsl' ? { pid: this.wslPid!, location: 'wsl' } : { pid: server.pid ?? null };
     }
 
     this.endpoint = endpoint;
+    const connectStart = Date.now();
     this.browser = await puppeteer.connect({ browserWSEndpoint: endpoint });
     this.context = await this.browser.createBrowserContext();
     this.page = await this.context.newPage();
+    // In WSL: startup timed inside the VM, plus the CDP session setup timed here.
+    if (startupMs !== undefined) result.launchTimeMs = startupMs + (Date.now() - connectStart);
     return result;
   }
 

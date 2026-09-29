@@ -20,6 +20,13 @@ npm run bench -- --targets=local --runs=3
 
 À la fin d'une campagne, les résultats sont agrégés, un résumé est ajouté à l'historique et le dashboard est régénéré : ouvrir `dashboard/index.html` (aucun serveur nécessaire).
 
+**Sous Windows, la campagne de référence tourne sous Linux, dans WSL** (voir [Campagne sous Linux depuis Windows](#campagne-sous-linux-depuis-windows-wsl)) :
+
+```bash
+npm run wsl -- setup                          # une fois : Node.js, navigateurs et leurs dépendances dans WSL
+npm run wsl -- bench --targets=local --runs=3 # le dashboard Linux est recopié dans dashboard/index.html
+```
+
 **Configuration locale** : les variables d'environnement peuvent être placées dans un fichier `.env` à la racine (ignoré par git, voir [`.env.example`](.env.example)), chargé par chaque commande `npm run` : `BENCH_CHROME_PATH`, `PLAYWRIGHT_BROWSERS_PATH`, `CAMOUFOX_INSTALL_DIR`, `LIGHTPANDA_*`.
 
 ## Commandes
@@ -36,6 +43,7 @@ npm run dashboard:artifact  # même page, sans enveloppe HTML, pour une publicat
 npm run list                # disponibilité des navigateurs et liste des cibles
 npm run install-browsers    # Chrome for Testing + Firefox/WebKit de Playwright (respecte PLAYWRIGHT_BROWSERS_PATH)
 npm run check-dashboard     # ouvre le dashboard généré et vérifie chaque onglet (erreurs JS, tableaux vides)
+npm run wsl -- <commande>   # depuis Windows : la même commande, sous Linux dans WSL (voir plus bas)
 npm test && npm run typecheck
 ```
 
@@ -58,6 +66,7 @@ npm test && npm run typecheck
 | `--interval` | `200` | intervalle d'échantillonnage RAM/CPU (ms) |
 | `--timeout` | par cible | remplace le timeout de navigation de toutes les cibles |
 | `--config` / `--results` | `config/targets.json` / `results` | fichier de cibles / dossier des résultats |
+| `--dashboard` | `dashboard/index.html` | dashboard généré ; avec un autre `--results`, `<results>/dashboard.html`, pour qu'un essai n'écrase pas le dashboard principal |
 | `--clean` | — | supprime tous les résultats précédents (runs bruts, captures, débit) |
 
 Sans `--resume`, les couples (navigateur, cible) de la campagne **remplacent** leurs runs précédents : des runs 6 à 10 laissés par une campagne à 10 runs ne se mélangent pas à une nouvelle campagne à 5 runs. Les autres couples restent dans `results/raw` et dans le dashboard.
@@ -95,9 +104,11 @@ Lightpanda expose un serveur compatible CDP ; il est piloté par Puppeteer. **Il
 
 | Plateforme | Mode | RAM/CPU |
 |---|---|---|
-| Linux / macOS | binaire natif (`LIGHTPANDA_BIN` ou `lightpanda` dans le `PATH`) | oui (USS sous Linux, RSS sous macOS) |
+| Linux / macOS | binaire natif (`LIGHTPANDA_BIN`, `lightpanda` dans le `PATH` ou `~/.local/bin/lightpanda`) | oui (USS sous Linux, RSS sous macOS) |
 | Windows | **build Linux lancé dans WSL2** : CDP joint via la redirection localhost de WSL | oui : échantillonné **dans** WSL (USS) |
 | partout | `LIGHTPANDA_WS_ENDPOINT=ws://…` : instance externe (Docker…) | non |
+
+Lightpanda ne charge par défaut ni les workers ni les iframes : une page qui calcule dans un worker, ou qui affiche un challenge dans une iframe (Cloudflare Turnstile), n'afficherait jamais son résultat. L'adapter les active (`--load-resources worker --load-resources iframe`). Les images et les feuilles de style restent désactivées, comme dans la configuration par défaut de Lightpanda.
 
 **Installation sous Windows (WSL2)**, dans la distribution WSL par défaut :
 
@@ -105,9 +116,11 @@ Lightpanda expose un serveur compatible CDP ; il est piloté par Puppeteer. **Il
 wsl -e sh -c "mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/lightpanda https://github.com/lightpanda-io/browser/releases/download/0.4.1/lightpanda-x86_64-linux && chmod a+x ~/.local/bin/lightpanda"
 ```
 
-Sous Windows, Lightpanda part avec un handicap : son lancement passe par `wsl.exe` et chaque requête traverse la VM. Deux façons de le réduire :
+**Temps de lancement.** Lightpanda écoute sur son port environ 40 ms après son lancement : le port est donc sondé toutes les 5 ms, sinon on mesurerait surtout l'intervalle de sondage. Sous Windows, `wsl.exe` coûte à lui seul environ 350 ms et la redirection de port de WSL ajoute encore du retard : mesuré depuis Windows, le lancement dépassait 700 ms. Le démarrage est donc chronométré **dans la VM**, du lancement du binaire à l'ouverture de son port, puis la connexion CDP est ajoutée depuis Windows (environ 60 ms au total).
+
+Sous Windows, Lightpanda garde un handicap : chaque requête traverse la VM, et sa mémoire est mesurée en USS alors que celle des autres navigateurs l'est en *private working set*. Deux façons de le réduire :
 - activer le **réseau miroir** de WSL (`networkingMode=mirrored` dans `%UserProfile%\.wslconfig`, puis `wsl --shutdown`) : Windows et WSL partagent alors `127.0.0.1`, sans passer par le NAT. Le benchmark le détecte (`wslinfo --networking-mode`) ;
-- pour une comparaison à armes égales, lancer toute la campagne **sous Linux** (dans WSL, sur un runner Linux ou via le workflow planifié) : tous les navigateurs y tournent alors en natif.
+- pour une comparaison à armes égales, lancer toute la campagne **sous Linux** : `npm run wsl -- bench` (voir [Campagne sous Linux depuis Windows](#campagne-sous-linux-depuis-windows-wsl)), un runner Linux ou le workflow planifié. Tous les navigateurs y tournent alors en natif.
 
 Variables optionnelles : `LIGHTPANDA_WSL_BIN` et `LIGHTPANDA_WSL_DISTRO`. `python3` doit être présent dans WSL (échantillonneur de ressources). En mode WSL, les fixtures `local://` et le proxy de comptage sont aussi servis sur l'adresse de Windows vue depuis WSL, et l'échantillonneur WSL garde la VM allumée pendant toute la campagne : son démarrage n'est jamais compté dans un temps de lancement. La version enregistrée est la vraie (`Lightpanda 0.4.1`), pas la version Chrome annoncée via CDP.
 
@@ -168,7 +181,7 @@ Pour chaque run, `results/raw/{navigateur}_{cible}_{run}.json` contient :
 
 - **Temps de chargement** (de `goto()` à `load`) et **de lancement**.
 - **RAM / CPU** de **tout l'arbre de process**, échantillonnés toutes les 200 ms : *private working set* sous Windows (`NtQuerySystemInformation`), *USS* sous Linux et dans WSL (`/proc/<pid>/smaps_rollup`), RSS sous macOS. L'USS ne compte que la mémoire propre à chaque process : additionner le RSS d'un navigateur à 10 process compterait 10 fois ses bibliothèques partagées. Le CPU est donné en **secondes de processeur consommées par le run** : contrairement à un % moyen, il ne dépend pas du temps que la fenêtre de mesure reste ouverte après le chargement.
-- **Octets réseau** : les pages distantes passent par un petit proxy local (HTTP + tunnels `CONNECT`) qui compte les octets reçus et envoyés pendant la navigation, TLS compris. C'est ce que facturerait un proxy payant, mesuré de la même façon pour tous les navigateurs. Les pages locales ne passent pas par le proxy : Playwright y aurait fait passer `127.0.0.1` et Chrome non, ce qui aurait faussé leurs temps de chargement.
+- **Octets réseau** : les pages distantes passent par un petit proxy local (HTTP + tunnels `CONNECT`) qui compte les octets reçus et envoyés pendant la navigation, TLS compris. C'est ce que facturerait un proxy payant, mesuré de la même façon pour tous les navigateurs. Les pages locales ne passent pas par le proxy : Playwright y aurait fait passer `127.0.0.1` et Chrome non, ce qui aurait faussé leurs temps de chargement. Quand le proxy ne peut pas joindre un site, il répond `502` au navigateur, comme un vrai proxy, et la cause est enregistrée dans le run (`proxyErrors`, affiché après `FAIL` dans le log) : on distingue ainsi une panne réseau d'un échec du navigateur. Il laisse 2 s à chaque adresse d'un site, et non les 250 ms de Node : sans IPv6 (WSL), une machine chargée perdait sinon environ 0,5 % des connexions.
 - **Contenu attendu** (pages locales) : nombre d'éléments trouvés pour chaque sélecteur annoncé par la page.
 - **Anti-bot** : verdict, score gradué, extrait de la page en cas d'échec.
 - **DOM** : hash de la séquence des balises et **nombre d'éléments par balise**.
@@ -193,7 +206,7 @@ Un fichier unique, les données embarquées. Chart.js est chargé depuis un CDN.
   - La **robustesse du classement** est testée par **bootstrap** : le classement est refait 200 fois en tirant au sort, avec remise, les runs de chaque case. On obtient ainsi, pour chaque navigateur, la part des tirages où il finit 1er et la plage de rangs où il tombe dans 90 % des cas. Une avance « fragile » signale un écart que les runs ne permettent pas d'affirmer.
 - **Détails** : synthèse par navigateur, matrice anti-bot, graphiques de chargement et de mémoire, RAM/CPU dans le temps pour un run, tableau navigateur × cible paginé et triable (IC 95 %, secondes de CPU, réseau, contenu attendu, similarité DOM, rendu visuel).
 - **Débit** : pages par minute et mémoire au pic selon le nombre de pages en parallèle, mémoire par page supplémentaire (pente), une page testée à la fois.
-- **Historique** : une courbe par navigateur, campagne après campagne, avec la version au survol.
+- **Historique** : une courbe par navigateur, campagne après campagne, avec la version au survol. Les campagnes de machines différentes (Windows, Linux sous WSL, runner de CI…) ne se mélangent jamais sur une courbe : quand l'historique en contient plusieurs, un sélecteur choisit la machine.
 
 La couleur identifie la **famille de moteur** (par exemple Chromium pour `playwright-chromium` et `patchright`) et reste la même quels que soient les filtres. Le **motif** identifie la variante : hachuré pour furtif, estompé pour lite ; en pointillés sur les courbes.
 
@@ -201,9 +214,28 @@ La couleur identifie la **famille de moteur** (par exemple Chromium pour `playwr
 
 `npm run throughput` ouvre N pages dans **un seul** navigateur, chaque page dans son propre contexte isolé, comme un scraper qui garde ses sessions séparées. Les N pages se partagent une file de chargements : 6 par page ouverte (24 au moins), pour que chaque niveau dure assez longtemps. Pour chaque N, on mesure les pages par minute, les échecs, la mémoire moyenne et au pic et les secondes de CPU par page. La **mémoire par page supplémentaire** est la pente de la mémoire au pic selon N. Un navigateur qui échoue sur plus de la moitié des chargements d'un palier ne passe pas aux paliers suivants : chaque chargement bloqué attend son timeout complet, et ce serait des minutes à confirmer un échec. Par défaut, deux pages : `local-heavy-js` (calcul JS) et `local-spa` (API JSON + DOM, un scraping typique). Résultats : `results/throughput/`, intégrés à l'agrégat et au dashboard.
 
+## Campagne sous Linux depuis Windows (WSL)
+
+Sous Windows, un seul navigateur, Lightpanda, tourne dans la VM WSL : lui seul fait traverser la VM à ses requêtes, et sa mémoire n'est pas mesurée comme celle des autres (USS contre *private working set*). **Sous Linux, tous les navigateurs tournent en natif et sont mesurés de la même façon**, sur l'OS où tournent les scrapers en production. `npm run wsl` fait tourner le benchmark dans WSL sans quitter Windows :
+
+```bash
+npm run wsl -- setup                           # une fois, puis après une mise à jour des dépendances
+npm run wsl -- bench --browsers=all            # n'importe quelle commande npm run, avec ses options
+npm run wsl -- throughput
+npm run wsl -- open                            # ouvre le dashboard de la campagne Linux
+```
+
+- **`setup`** installe, dans la distribution WSL par défaut : Node.js 22 (dans `~/.local`, archive officielle vérifiée), les dépendances npm, Chrome for Testing, Firefox et WebKit de Playwright, leurs bibliothèques système et leurs polices (`playwright install-deps`), Camoufox et Lightpanda. Les paquets système passent par `wsl -u root`, sans mot de passe. Chaque étape est sautée si elle est déjà faite.
+- **Chaque commande** copie d'abord l'arbre de travail Windows (fichiers suivis et non ignorés par git, plus `config/targets.local.json`) dans `~/browser-benchmark`, sur le disque de la VM : `/mnt/c` serait trop lent pour `node_modules`. `npm ci` n'est relancé que si `package-lock.json` a changé. Le `.env` Windows n'est pas copié : ses chemins sont des chemins Windows.
+- **Les runs restent dans WSL** (`~/browser-benchmark/results`) : les campagnes Windows et Linux ne se mélangent donc jamais, ni dans les runs ni dans l'historique. La campagne Linux étant la référence, `bench` et `throughput` **recopient son dashboard dans `dashboard/index.html`** côté Windows (sauf avec `--results` ou `--dashboard`). L'original reste dans `~/browser-benchmark/dashboard/index.html`, accessible via `\\wsl.localhost\<distribution>\…` ou `npm run wsl -- open`.
+- **Anciennes campagnes** : `results/archive/<date>-<plateforme>/` (ignoré par git) garde leurs runs, captures, tests de débit, historique et dashboard.
+- Variables : `BENCH_WSL_DIR` (chemin Linux de la copie) et `LIGHTPANDA_WSL_DISTRO` (distribution utilisée).
+
+Les chiffres absolus sont ceux d'une VM (WSL2 lui donne par défaut la moitié de la RAM de la machine) : ils diffèrent d'un Linux installé directement sur la machine, mais tous les navigateurs paient le même coût. Les résultats anti-bot changent aussi : les navigateurs annoncent Linux, ce qui est plus proche d'un scraper en production, mais n'est pas comparable à une campagne Windows.
+
 ## Historique et campagne planifiée
 
-Chaque `npm run bench` ajoute un résumé daté dans `results/history/`, avec les versions des navigateurs. Ce résumé ne porte que sur les runs de **sa** campagne (`--campaign`), pas sur tout ce qui reste dans `results/raw`.
+Chaque `npm run bench` ajoute un résumé daté dans `results/history/`, avec les versions des navigateurs. Ce résumé ne porte que sur les runs de **sa** campagne (`--campaign`), pas sur tout ce qui reste dans `results/raw`. Une campagne reprise (`--resume`) ou découpée en plusieurs commandes écrit un résumé par commande, chacun couvrant toute la campagne jusque-là : le dashboard n'en garde que le dernier.
 
 Le workflow [`campaign.yml`](.github/workflows/campaign.yml) lance chaque lundi une campagne complète et un test de débit. Il peut aussi être déclenché à la main avec des paramètres. Il :
 - publie le dashboard et les résultats en artefact ;
@@ -240,11 +272,15 @@ src/
 │   └── history.ts           # résumé par campagne
 ├── fixtures/server.ts       # pages local://
 ├── config/targets.ts
+├── util/                    # process, WSL, anti-veille
 └── cli.ts
 dashboard/
 ├── template.html
 └── generate-dashboard.ts
-scripts/check-dashboard.ts   # ouvre le dashboard dans Chrome et vérifie chaque onglet (CI)
+scripts/
+├── check-dashboard.ts       # ouvre le dashboard dans Chrome et vérifie chaque onglet (CI)
+├── wsl.ts                   # npm run wsl : copie l'arbre de travail dans WSL et y lance la commande
+└── wsl.sh                   # étapes exécutées dans WSL : installation, synchronisation, npm ci, lancement
 ```
 
 ### Ajouter un navigateur
@@ -260,9 +296,10 @@ Un navigateur Chromium doit lancer `benchChromePath()` pour rester comparable au
 ## Dépannage
 
 - **Un navigateur basé sur Firefox (`playwright-firefox`, `camoufox`) échoue avec `spawn UNKNOWN`** sous Windows : ses fichiers ont été installés depuis une **application Windows empaquetée** (MSIX), par exemple le terminal de l'app de bureau Claude. Ces applications redirigent `AppData` vers leur cache privé (`AppData\Local\Packages\<app>\LocalCache`), et le chargeur de Windows n'y retrouve pas la DLL `mozglue` de Firefox. Il faut les installer hors d'`AppData` : `PLAYWRIGHT_BROWSERS_PATH` et `CAMOUFOX_INSTALL_DIR` dans `.env`, puis `npm run install-browsers` et `npx camoufox-js fetch`.
+- **Sous Windows PowerShell, `npm run bench -- --resume` perd son `--`** (le script `npm.ps1` de npm le supprime) : npm garde alors les options pour lui, et la commande tournerait avec ses valeurs par défaut. Sans `--resume`, elle remplacerait les runs de tous ses couples (navigateur, cible). Le benchmark le détecte (npm expose ces options en `npm_config_<nom>`) et refuse de démarrer. Utiliser `npm.cmd run bench -- --resume`, ou mettre le séparateur entre guillemets : `npm run bench '--' --resume`. Même chose pour `npm run wsl`.
 - **Camoufox et le parallélisme** : dans nos essais, les chargements concurrents de Camoufox finissent en timeout dès 2 pages en parallèle, même en contextes séparés. Le tableau de débit l'indique.
 - **Selenium** : Selenium Manager résout, et télécharge si besoin, le chromedriver qui correspond à la build de Chrome du benchmark, au premier lancement. Ce délai n'est pas compté dans le temps de lancement.
-- **Mise en veille** : pendant une campagne, le benchmark empêche la veille automatique (Windows : demande `SetThreadExecutionState` tenue par l'échantillonneur ; macOS : `caffeinate`). Une veille gèlerait les runs en pleine mesure. Aucun réglage n'est modifié ; fermer le capot met quand même en veille.
+- **Mise en veille** : pendant une campagne, le benchmark empêche la veille automatique. Sous Windows, la demande `SetThreadExecutionState` est tenue par l'échantillonneur ; sous macOS, par `caffeinate` ; sous Linux, par `systemd-inhibit`. Dans WSL, c'est Windows qui se met en veille, pas la VM : la même demande Windows y est faite par un `powershell.exe` lancé depuis WSL. Une veille gèlerait les runs en pleine mesure. Aucun réglage n'est modifié ; fermer le capot met quand même en veille.
 - **Campagne interrompue** (redémarrage, capot fermé) : chaque run est écrit dès qu'il se termine. `npm run bench -- --resume`, avec les mêmes options, reprend là où elle s'est arrêtée. Un run en échec à cause de la coupure peut être supprimé de `results/raw` puis refait par `--resume`.
 - **Un échantillonneur RAM/CPU s'arrête** en cours de campagne (process PowerShell ou WSL tué) : il est relancé avant le run suivant, avec un avertissement dans le log.
 

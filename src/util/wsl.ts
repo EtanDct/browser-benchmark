@@ -1,7 +1,14 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import os from 'node:os';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+
+/** True when this process runs inside WSL (Linux userland in a VM on a Windows host). */
+export function insideWsl(): boolean {
+  return process.platform === 'linux' && (/microsoft/i.test(os.release()) || existsSync('/proc/sys/fs/binfmt_misc/WSLInterop'));
+}
 
 /** Distro used for WSL-hosted browsers; defaults to the WSL default distro. */
 export function wslDistroArgs(): string[] {

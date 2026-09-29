@@ -31,7 +31,12 @@ export function getFreePort(): Promise<number> {
   });
 }
 
-export async function waitForPort(port: number, timeoutMs: number, isAlive: () => boolean = () => true): Promise<void> {
+/**
+ * Polls until the port accepts connections. The wait is part of the measured launch time: Lightpanda
+ * listens ~35 ms after exec, so a 100 ms poll would mostly measure the poll. A refused loopback connect
+ * costs ~1 ms, so polling every 5 ms is cheap.
+ */
+export async function waitForPort(port: number, timeoutMs: number, isAlive: () => boolean = () => true, intervalMs = 5): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (!isAlive()) throw new Error('process exited before its port opened');
@@ -41,7 +46,7 @@ export async function waitForPort(port: number, timeoutMs: number, isAlive: () =
       socket.once('error', () => resolve(false));
     });
     if (open) return;
-    await sleep(100);
+    await sleep(intervalMs);
   }
   throw new Error(`port ${port} did not open within ${timeoutMs}ms`);
 }

@@ -1,8 +1,8 @@
-import { spawn } from 'node:child_process';
 import type { AdapterDefinition, ProcessLocation } from '../adapters/base.js';
 import { startFixtureServer, type FixtureServer } from '../fixtures/server.js';
 import { ResourceSampler } from '../monitor/resource-sampler.js';
 import { startByteProxy, type ByteProxy } from '../network/byte-proxy.js';
+import { keepAwake } from '../util/keep-awake.js';
 import { errorMessage } from '../util/time.js';
 
 /** What both runners need around the browsers: availability, local pages, byte proxy, samplers. */
@@ -47,12 +47,8 @@ export async function prepareRuntime(options: RuntimeOptions): Promise<Runtime> 
     available.push(definition);
   }
 
-  // A sleep freezes runs mid-measurement. Windows: the sampler holds the request (windows-probe.ts).
-  if (process.platform === 'darwin') {
-    const caffeinate = spawn('caffeinate', ['-i', '-w', String(process.pid)], { stdio: 'ignore' });
-    caffeinate.on('error', () => undefined);
-    caffeinate.unref();
-  }
+  // A sleep freezes runs mid-measurement (Windows: the sampler holds the request, see windows-probe.ts).
+  const releaseAwake = keepAwake();
 
   const fixtures = options.fixtures && available.length ? await startFixtureServer([...wslHostIps]) : null;
   const proxy = options.byteProxy && available.length ? await startByteProxy([...wslHostIps]) : null;
@@ -89,6 +85,7 @@ export async function prepareRuntime(options: RuntimeOptions): Promise<Runtime> 
       await Promise.all(Object.values(samplers).map((s) => s.dispose()));
       await proxy?.close();
       await fixtures?.close();
+      releaseAwake();
     },
   };
 }

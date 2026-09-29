@@ -369,6 +369,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
       <div class="card" id="history-content">
         <div class="drill-controls">
           <label>Mesure <select id="history-metric"></select></label>
+          <label id="history-env-label" hidden>Machine <select id="history-env"></select></label>
           <span class="muted" id="history-info"></span>
         </div>
         <div class="chart-box"><canvas id="history-chart" aria-label="Évolution de la mesure par campagne"></canvas></div>
@@ -526,13 +527,25 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   }
 
   // ---------- header & filters ----------
+  function osName(env) {
+    if (!env || !env.platform) return null;
+    if (env.platform === 'win32') return 'Windows';
+    if (env.platform === 'darwin') return 'macOS';
+    if (env.platform === 'linux') return env.wsl || /microsoft/i.test(env.osRelease || '') ? 'Linux (WSL2)' : 'Linux';
+    return env.platform;
+  }
+  /** Campaigns are only comparable on the same OS and machine: the History tab never mixes two of them. */
+  function machineOf(env) {
+    return env && env.platform ? osName(env) + (env.cpuModel ? ' · ' + env.cpuModel + ' × ' + env.cpuCount : '') : 'machine inconnue';
+  }
+
   function renderMeta() {
     var env = data.environment || {};
     var meta = document.getElementById('meta');
     [
       'Généré le ' + new Date(data.generatedAt).toLocaleString('fr-FR'),
       data.runCount + ' runs',
-      env.platform ? env.platform + ' ' + env.osRelease + ' (' + env.arch + ')' : null,
+      env.platform ? osName(env) + ' ' + env.osRelease + ' (' + env.arch + ')' : null,
       env.cpuModel ? env.cpuModel + ' × ' + env.cpuCount : null,
       env.totalMemBytes ? fmt(env.totalMemBytes / Math.pow(2, 30), 0, ' Go RAM') : null,
       env.nodeVersion ? 'Node ' + env.nodeVersion : null
@@ -1258,7 +1271,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     }
     var envPlatform = (data.environment || {}).platform;
     if (envPlatform === 'win32' && ranking.rows.some(function (r) { return familyOf(r.browser) === 'lightpanda'; })) {
-      notes.push('Sous Windows, Lightpanda (pas de version Windows) tourne dans WSL2 : son démarrage et ses requêtes traversent la VM, ce qui le désavantage sur la vitesse et le démarrage. Une campagne sous Linux le compare à armes égales.');
+      notes.push('Sous Windows, Lightpanda (pas de version Windows) tourne dans WSL2 : ses requêtes traversent la VM, ce qui le désavantage sur la vitesse (son démarrage est chronométré dans la VM, sans le passage par wsl.exe). Une campagne sous Linux (npm run wsl -- bench) le compare à armes égales.');
     }
     if (data.memoryMetrics.length > 1) notes.push('Mémoire : private working set (Windows) et USS (Linux/WSL), deux mesures de la mémoire propre au navigateur.');
     if (ranking.rows.some(function (r) { return r.browser.indexOf('puppeteer-stealth') === 0; })) {
@@ -1356,14 +1369,25 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     var select = document.getElementById('history-metric');
     HISTORY_METRICS.forEach(function (m) { select.appendChild(el('option', { value: m.key, text: m.label })); });
     select.addEventListener('change', function () { renderHistory(); });
+    var machines = [];
+    (data.history || []).forEach(function (h) { var m = machineOf(h.environment); if (machines.indexOf(m) < 0) machines.push(m); });
+    var envSelect = document.getElementById('history-env');
+    machines.forEach(function (m) { envSelect.appendChild(el('option', { value: m, text: m })); });
+    // Default: the machine of the current report, else the one of the latest campaign.
+    var current = machineOf(data.environment);
+    envSelect.value = machines.indexOf(current) >= 0 ? current : machines[machines.length - 1] || '';
+    document.getElementById('history-env-label').hidden = machines.length < 2;
+    envSelect.addEventListener('change', function () { renderHistory(); });
   })();
   document.getElementById('tp-target-select').addEventListener('change', function () { renderThroughput(); });
 
   function renderHistory() {
-    var history = data.history || [];
-    document.getElementById('history-empty').hidden = history.length > 0;
-    document.getElementById('history-content').hidden = !history.length;
-    if (!history.length) return;
+    var all = data.history || [];
+    document.getElementById('history-empty').hidden = all.length > 0;
+    document.getElementById('history-content').hidden = !all.length;
+    if (!all.length) return;
+    var machine = document.getElementById('history-env').value;
+    var history = all.filter(function (h) { return !machine || machineOf(h.environment) === machine; });
     var metric = HISTORY_METRICS.find(function (m) { return m.key === document.getElementById('history-metric').value; }) || HISTORY_METRICS[0];
     var browsers = [];
     history.forEach(function (h) { h.browsers.forEach(function (b) { if (browsers.indexOf(b.browser) < 0 && (state.browsers.has(b.browser) || data.browsers.indexOf(b.browser) < 0)) browsers.push(b.browser); }); });

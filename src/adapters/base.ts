@@ -57,6 +57,11 @@ export interface LaunchResult {
   pid: number | null;
   /** Namespace of `pid`; defaults to 'host'. */
   location?: ProcessLocation;
+  /**
+   * Launch time measured by the adapter, when part of launch() is not the browser starting: the
+   * wsl.exe hop and WSL port forwarding for a browser hosted in WSL. Defaults to launch()'s wall-clock time.
+   */
+  launchTimeMs?: number;
 }
 
 export interface Availability {
