@@ -14,7 +14,8 @@
     "install-browsers": "tsx src/cli.ts install-browsers",
     "dashboard:artifact": "tsx dashboard/generate-dashboard.ts --artifact",
     "throughput": "tsx src/cli.ts throughput",
-    "check-dashboard": "tsx scripts/check-dashboard.ts"
+    "check-dashboard": "tsx scripts/check-dashboard.ts",
+    "wsl": "tsx scripts/wsl.ts"
   },
   "engines": {
     "node": ">=22"

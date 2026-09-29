@@ -8,7 +8,7 @@ import { isAntiBotTarget, type Target } from '../config/targets.js';
 import { summarizeSamples, type ResourceSampler } from '../monitor/resource-sampler.js';
 import { killTree } from '../util/proc.js';
 import { errorMessage, sleep, TimeoutError, withTimeout } from '../util/time.js';
-import { wslKill } from '../util/wsl.js';
+import { insideWsl, wslKill } from '../util/wsl.js';
 import { prepareRuntime, type Runtime } from './runtime.js';
 import { RUN_SCHEMA_VERSION, type EnvironmentInfo, type RunMode, type RunRecord } from './types.js';
 
@@ -65,6 +65,7 @@ export function environmentInfo(): EnvironmentInfo {
     cpuCount: cpus.length,
     totalMemBytes: os.totalmem(),
     nodeVersion: process.version,
+    ...(insideWsl() ? { wsl: true } : {}),
   };
 }
 
@@ -192,7 +193,7 @@ async function executeRun(ctx: RunContext): Promise<RunRecord> {
     const launched = await withTimeout(adapter.launch({ proxyUrl: proxy?.url }), options.launchTimeoutMs, 'launch');
     pid = launched.pid;
     location = launched.location ?? 'host';
-    record.launchTimeMs = Date.now() - launchStart;
+    record.launchTimeMs = launched.launchTimeMs ?? Date.now() - launchStart;
     record.browserVersion = await withTimeout(adapter.version?.() ?? Promise.resolve('unknown'), 5_000, 'version').catch(() => 'unknown');
 
     if (pid !== null) {

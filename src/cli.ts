@@ -41,6 +41,7 @@ Bench options:
   --timeout=<ms>        override every target's navigation timeout
   --config=<file>       targets file                                                   [config/targets.json]
   --results=<dir>       results directory                                                          [results]
+  --dashboard=<file>    generated dashboard      [dashboard/index.html, or <results>/dashboard.html with --results]
   --clean               delete every previous result (raw runs, screenshots, throughput) first
 
   Without --resume, the (browser, target) pairs of the campaign replace their previous runs; other
@@ -108,6 +109,7 @@ async function main(): Promise<void> {
       timeout: { type: 'string' },
       config: { type: 'string', default: 'config/targets.json' },
       results: { type: 'string', default: 'results' },
+      dashboard: { type: 'string' },
       clean: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -118,7 +120,9 @@ async function main(): Promise<void> {
     return;
   }
   const resultsDir = path.resolve(values.results);
-  const dashboardFile = path.resolve('dashboard/index.html');
+  // Another results directory gets its own dashboard: a test run must not overwrite the main one.
+  const dashboardFile = path.resolve(values.dashboard
+    ?? (resultsDir === path.resolve('results') ? 'dashboard/index.html' : path.join(resultsDir, 'dashboard.html')));
   const historyDir = path.join(resultsDir, 'history');
 
   if (command === 'list') {

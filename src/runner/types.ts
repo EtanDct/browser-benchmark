@@ -15,6 +15,8 @@ export interface EnvironmentInfo {
   cpuCount: number;
   totalMemBytes: number;
   nodeVersion: string;
+  /** Linux inside WSL2: a VM on a Windows host. Absent in older records (osRelease then contains "microsoft"). */
+  wsl?: boolean;
 }
 
 export interface RunRecord {
