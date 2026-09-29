@@ -187,6 +187,7 @@ async function executeRun(ctx: RunContext): Promise<RunRecord> {
   let pid: number | null = null;
   let location: ProcessLocation = 'host';
   let sampler: ResourceSampler | undefined;
+  let navigating = false;
 
   try {
     const launchStart = Date.now();
@@ -209,6 +210,7 @@ async function executeRun(ctx: RunContext): Promise<RunRecord> {
     };
     const hardLimit = target.timeoutMs + target.settleMs + navOptions.challengeWaitMs + HARD_TIMEOUT_MARGIN_MS;
     proxy?.reset();
+    navigating = true;
     record.navigation = await withTimeout(adapter.navigate(ctx.url, navOptions), hardLimit, 'navigation');
     if (proxy) record.network = proxy.read();
   } catch (err) {
@@ -216,6 +218,9 @@ async function executeRun(ctx: RunContext): Promise<RunRecord> {
     record.timedOut = err instanceof TimeoutError;
     record.navigation = { ...record.navigation, success: false, errorMessage: record.navigation.errorMessage ?? record.error };
   } finally {
+    // Before the navigation, the counts and errors still belong to the previous run.
+    const proxyErrors = navigating ? proxy?.errors() ?? [] : [];
+    if (proxyErrors.length) record.proxyErrors = proxyErrors;
     if (sampler) {
       const samples = sampler.end();
       record.resources = {
@@ -250,7 +255,10 @@ async function executeRun(ctx: RunContext): Promise<RunRecord> {
 function formatRunLine(record: RunRecord, position: string): string {
   const nav = record.navigation;
   const head = `${position} [${record.browser}] ${record.target} ${record.run > 0 ? `#${record.run}` : '(chauffe)'}`;
-  if (!nav.success) return `${head}  FAIL  ${record.error ?? nav.errorMessage ?? 'unknown error'}`;
+  if (!nav.success) {
+    const proxy = record.proxyErrors ? `  (proxy: ${record.proxyErrors.join(', ')})` : '';
+    return `${head}  FAIL  ${record.error ?? nav.errorMessage ?? 'unknown error'}${proxy}`;
+  }
   const parts = [`${head}  ok  ${nav.loadTimeMs}ms`];
   if (nav.httpStatus) parts.push(`HTTP ${nav.httpStatus}`);
   const summary = record.resources?.summary;

@@ -181,7 +181,7 @@ Pour chaque run, `results/raw/{navigateur}_{cible}_{run}.json` contient :
 
 - **Temps de chargement** (de `goto()` à `load`) et **de lancement**.
 - **RAM / CPU** de **tout l'arbre de process**, échantillonnés toutes les 200 ms : *private working set* sous Windows (`NtQuerySystemInformation`), *USS* sous Linux et dans WSL (`/proc/<pid>/smaps_rollup`), RSS sous macOS. L'USS ne compte que la mémoire propre à chaque process : additionner le RSS d'un navigateur à 10 process compterait 10 fois ses bibliothèques partagées. Le CPU est donné en **secondes de processeur consommées par le run** : contrairement à un % moyen, il ne dépend pas du temps que la fenêtre de mesure reste ouverte après le chargement.
-- **Octets réseau** : les pages distantes passent par un petit proxy local (HTTP + tunnels `CONNECT`) qui compte les octets reçus et envoyés pendant la navigation, TLS compris. C'est ce que facturerait un proxy payant, mesuré de la même façon pour tous les navigateurs. Les pages locales ne passent pas par le proxy : Playwright y aurait fait passer `127.0.0.1` et Chrome non, ce qui aurait faussé leurs temps de chargement.
+- **Octets réseau** : les pages distantes passent par un petit proxy local (HTTP + tunnels `CONNECT`) qui compte les octets reçus et envoyés pendant la navigation, TLS compris. C'est ce que facturerait un proxy payant, mesuré de la même façon pour tous les navigateurs. Les pages locales ne passent pas par le proxy : Playwright y aurait fait passer `127.0.0.1` et Chrome non, ce qui aurait faussé leurs temps de chargement. Quand le proxy ne peut pas joindre un site, il répond `502` au navigateur, comme un vrai proxy, et la cause est enregistrée dans le run (`proxyErrors`, affiché après `FAIL` dans le log) : on distingue ainsi une panne réseau d'un échec du navigateur. Il laisse 2 s à chaque adresse d'un site, et non les 250 ms de Node : sans IPv6 (WSL), une machine chargée perdait sinon environ 0,5 % des connexions.
 - **Contenu attendu** (pages locales) : nombre d'éléments trouvés pour chaque sélecteur annoncé par la page.
 - **Anti-bot** : verdict, score gradué, extrait de la page en cas d'échec.
 - **DOM** : hash de la séquence des balises et **nombre d'éléments par balise**.
@@ -235,7 +235,7 @@ Les chiffres absolus sont ceux d'une VM (WSL2 lui donne par défaut la moitié d
 
 ## Historique et campagne planifiée
 
-Chaque `npm run bench` ajoute un résumé daté dans `results/history/`, avec les versions des navigateurs. Ce résumé ne porte que sur les runs de **sa** campagne (`--campaign`), pas sur tout ce qui reste dans `results/raw`.
+Chaque `npm run bench` ajoute un résumé daté dans `results/history/`, avec les versions des navigateurs. Ce résumé ne porte que sur les runs de **sa** campagne (`--campaign`), pas sur tout ce qui reste dans `results/raw`. Une campagne reprise (`--resume`) ou découpée en plusieurs commandes écrit un résumé par commande, chacun couvrant toute la campagne jusque-là : le dashboard n'en garde que le dernier.
 
 Le workflow [`campaign.yml`](.github/workflows/campaign.yml) lance chaque lundi une campagne complète et un test de débit. Il peut aussi être déclenché à la main avec des paramètres. Il :
 - publie le dashboard et les résultats en artefact ;

@@ -6,6 +6,7 @@ import type { AdapterDefinition } from '../src/adapters/base.js';
 import type { Target } from '../src/config/targets.js';
 import { connectTarget, startByteProxy } from '../src/network/byte-proxy.js';
 import { buildJobs, pendingJobs, rawFileName } from '../src/runner/benchmark-runner.js';
+import { getFreePort } from '../src/util/proc.js';
 
 const variant = (name: string) => ({ definition: { name } as AdapterDefinition, mode: 'full' as const, key: name });
 const target = (name: string, runs = 1, url = 'https://x.test', group = 'performance') => ({ name, runs, url, group } as Target);
@@ -76,6 +77,26 @@ describe('byte-counting proxy', () => {
     } finally {
       await proxy.close();
       origin.close();
+    }
+  });
+
+  it('answers a tunnel it cannot open with a 502 and records why', async () => {
+    const proxy = await startByteProxy();
+    try {
+      const closedPort = await getFreePort();
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        http.request({ host: '127.0.0.1', port: Number(new URL(proxy.url).port), method: 'CONNECT', path: `127.0.0.1:${closedPort}` })
+          .on('connect', (res, socket) => { socket.destroy(); resolve(res.statusCode); })
+          .on('error', reject)
+          .end();
+      });
+      // Closing without an answer would reach the browser as an empty response (ERR_EMPTY_RESPONSE).
+      assert.equal(status, 502);
+      assert.deepEqual(proxy.errors(), [`127.0.0.1:${closedPort} ECONNREFUSED`]);
+      proxy.reset();
+      assert.deepEqual(proxy.errors(), []);
+    } finally {
+      await proxy.close();
     }
   });
 });

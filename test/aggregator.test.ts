@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { aggregate, campaignOf, computeStats, consensusTagCounts, latestCampaign, tagSimilarity, tCritical } from '../src/aggregate/aggregator.js';
+import { latestPerCampaign, type HistoryEntry } from '../src/aggregate/history.js';
 import type { RunRecord } from '../src/runner/types.js';
 
 const environment = { platform: 'linux', osRelease: '6', arch: 'x64', cpuModel: 'cpu', cpuCount: 4, totalMemBytes: 8e9, nodeVersion: 'v22' };
@@ -148,5 +149,24 @@ describe('campaigns', () => {
     const newer = { ...record('a', 'page', 2), campaign: 'w2' };
     assert.equal(latestCampaign([older, newer]), 'w2');
     assert.equal(campaignOf(record('a', 'page', 3)), 'legacy');
+  });
+});
+
+describe('history', () => {
+  const entry = (campaignAt: string, campaign?: string): HistoryEntry =>
+    ({ schemaVersion: 1, campaignAt, campaign, runCount: 1, environment: null, browsers: [] });
+
+  it('keeps one entry per campaign, the latest, when a campaign was resumed or split', () => {
+    const entries = [
+      entry('2026-09-29T16:00:00Z', 'b'),
+      entry('2026-09-22T10:00:00Z', 'a'),
+      entry('2026-09-29T17:30:00Z', 'b'),
+      entry('2026-09-01T10:00:00Z'),
+    ];
+    assert.deepEqual(latestPerCampaign(entries).map((e) => `${e.campaign ?? '-'} ${e.campaignAt}`), [
+      '- 2026-09-01T10:00:00Z',
+      'a 2026-09-22T10:00:00Z',
+      'b 2026-09-29T17:30:00Z',
+    ]);
   });
 });

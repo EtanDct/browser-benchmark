@@ -46,6 +46,8 @@ export interface RunRecord {
   } | null;
   /** Bytes moved through the counting proxy during navigation (remote targets only). */
   network?: ByteCounts | null;
+  /** Upstream connections the byte proxy could not open during the page ("host:port CODE"): tells a network failure from a browser one. */
+  proxyErrors?: string[];
   /** File name in results/screens, for visual comparison. */
   screenshot?: string;
   /** Set when the run failed outside navigation (launch error, hard timeout...). */
