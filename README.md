@@ -24,8 +24,7 @@ npm run bench -- --targets=local --runs=3
 
 ```bash
 npm run wsl -- setup                          # une fois : Node.js, navigateurs et leurs dépendances dans WSL
-npm run wsl -- bench --targets=local --runs=3
-npm run wsl -- open                           # dashboard de la campagne Linux
+npm run wsl -- bench --targets=local --runs=3 # le dashboard Linux est recopié dans dashboard/index.html
 ```
 
 **Configuration locale** : les variables d'environnement peuvent être placées dans un fichier `.env` à la racine (ignoré par git, voir [`.env.example`](.env.example)), chargé par chaque commande `npm run` : `BENCH_CHROME_PATH`, `PLAYWRIGHT_BROWSERS_PATH`, `CAMOUFOX_INSTALL_DIR`, `LIGHTPANDA_*`.
@@ -228,7 +227,8 @@ npm run wsl -- open                            # ouvre le dashboard de la campag
 
 - **`setup`** installe, dans la distribution WSL par défaut : Node.js 22 (dans `~/.local`, archive officielle vérifiée), les dépendances npm, Chrome for Testing, Firefox et WebKit de Playwright, leurs bibliothèques système et leurs polices (`playwright install-deps`), Camoufox et Lightpanda. Les paquets système passent par `wsl -u root`, sans mot de passe. Chaque étape est sautée si elle est déjà faite.
 - **Chaque commande** copie d'abord l'arbre de travail Windows (fichiers suivis et non ignorés par git, plus `config/targets.local.json`) dans `~/browser-benchmark`, sur le disque de la VM : `/mnt/c` serait trop lent pour `node_modules`. `npm ci` n'est relancé que si `package-lock.json` a changé. Le `.env` Windows n'est pas copié : ses chemins sont des chemins Windows.
-- **Les résultats restent dans WSL** (`~/browser-benchmark/results`, dashboard dans `~/browser-benchmark/dashboard/index.html`, accessible depuis Windows via `\\wsl.localhost\<distribution>\…`). Les campagnes Windows et Linux ne se mélangent donc jamais, ni dans les runs ni dans l'historique.
+- **Les runs restent dans WSL** (`~/browser-benchmark/results`) : les campagnes Windows et Linux ne se mélangent donc jamais, ni dans les runs ni dans l'historique. La campagne Linux étant la référence, `bench` et `throughput` **recopient son dashboard dans `dashboard/index.html`** côté Windows (sauf avec `--results` ou `--dashboard`). L'original reste dans `~/browser-benchmark/dashboard/index.html`, accessible via `\\wsl.localhost\<distribution>\…` ou `npm run wsl -- open`.
+- **Anciennes campagnes** : `results/archive/<date>-<plateforme>/` (ignoré par git) garde leurs runs, captures, tests de débit, historique et dashboard.
 - Variables : `BENCH_WSL_DIR` (chemin Linux de la copie) et `LIGHTPANDA_WSL_DISTRO` (distribution utilisée).
 
 Les chiffres absolus sont ceux d'une VM (WSL2 lui donne par défaut la moitié de la RAM de la machine) : ils diffèrent d'un Linux installé directement sur la machine, mais tous les navigateurs paient le même coût. Les résultats anti-bot changent aussi : les navigateurs annoncent Linux, ce qui est plus proche d'un scraper en production, mais n'est pas comparable à une campagne Windows.

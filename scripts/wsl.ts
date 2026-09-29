@@ -2,11 +2,12 @@
  * Runs the benchmark under Linux, inside WSL, from this Windows working tree: every browser then runs
  * natively (Lightpanda included, which has no Windows build) and is measured the same way (USS).
  * The WSL copy lives on the VM's own disk (/mnt/c is too slow for node_modules) and keeps its own
- * node_modules, browsers, results and dashboard: Windows and Linux results are never mixed.
+ * node_modules, browsers and results, so Windows and Linux runs are never mixed. Its dashboard is
+ * copied back to dashboard/index.html: the Linux campaign is the reference one.
  */
 import '../src/env.js';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { copyFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { toWslPath, wslDistroArgs, wslShell } from '../src/util/wsl.js';
@@ -14,7 +15,8 @@ import { toWslPath, wslDistroArgs, wslShell } from '../src/util/wsl.js';
 const HELP = `Usage, from Windows:
   npm run wsl -- setup               install everything in WSL: Node.js, dependencies, browsers and their
                                      system libraries, Camoufox, Lightpanda (idempotent: rerun after an update)
-  npm run wsl -- <script> [options]  copy this working tree to WSL, then run "npm run <script>" there
+  npm run wsl -- <script> [options]  copy this working tree to WSL, then run "npm run <script>" there;
+                                     bench/throughput copy the Linux dashboard back to dashboard/index.html
                                        e.g. npm run wsl -- bench --browsers=all
                                             npm run wsl -- throughput
                                             npm run wsl -- list
@@ -88,8 +90,11 @@ async function main(): Promise<void> {
 
   step(script, ['run', dest, command, ...(rest.length ? ['--', ...rest] : [])]);
   // With --results or --dashboard the page is elsewhere, and the command already printed where.
-  if (REPORTING.has(command) && !rest.some((a) => /^--(results|dashboard)\b/.test(a))) {
-    console.log(`\nDashboard (Linux): ${dashboard}\nOpen it with: npm run wsl -- open`);
+  if (REPORTING.has(command) && !rest.some((a) => /^--(results|dashboard)\b/.test(a)) && existsSync(dashboard)) {
+    // The Linux campaign is the reference: its dashboard also becomes this working tree's.
+    const local = path.join(repo, 'dashboard', 'index.html');
+    copyFileSync(dashboard, local);
+    console.log(`\nDashboard (Linux): ${dashboard}\nCopied to ${local}`);
   }
 }
 
