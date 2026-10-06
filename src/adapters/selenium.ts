@@ -24,6 +24,9 @@ let cachedPaths: Promise<BinaryPaths> | undefined;
  */
 function resolvePaths(): Promise<BinaryPaths> {
   cachedPaths ??= benchChromePath().then((browserPath) => {
+    // Otherwise a chromedriver on PATH wins whatever its version: GitHub runners ship one for their
+    // own Chrome, a release ahead of the pinned build, and every session then fails to start.
+    process.env.SE_SKIP_DRIVER_IN_PATH ??= 'true';
     const { driverPath } = getBinaryPaths(new chrome.Options().setBinaryPath(browserPath));
     return { driverPath, browserPath };
   });
