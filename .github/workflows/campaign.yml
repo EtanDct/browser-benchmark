@@ -41,9 +41,12 @@ jobs:
       CAMPAIGN: gh-${{ github.run_id }}
       # Outside the workspace so a self-hosted runner keeps it between jobs: fetched once.
       CAMOUFOX_INSTALL_DIR: ${{ github.workspace }}/../camoufox
-      # Recreated for every job: a self-hosted runner does not clean the temp dir's contents reliably.
-      HISTORY_DIR: ${{ runner.temp }}/bench-history
     steps:
+      # The runner context does not exist yet in the job's env (GitHub then rejects the whole file),
+      # so the path comes from $RUNNER_TEMP. Recreated for every job: a self-hosted runner does not
+      # clean the temp dir's contents reliably.
+      - name: Set the history folder
+        run: echo "HISTORY_DIR=$RUNNER_TEMP/bench-history" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
