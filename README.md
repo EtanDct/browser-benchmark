@@ -13,18 +13,18 @@ Chaque navigateur est un **adapter** derrière une interface commune : en ajoute
 ```bash
 npm install                                   # installe aussi Chrome for Testing (Puppeteer)
 npm run install-browsers                      # Chrome for Testing + Firefox et WebKit de Playwright
-npx camoufox-js fetch                         # Camoufox (~500 Mo), optionnel
+npx camoufox-js fetch                         # Camoufox (~660 Mo), optionnel
 npm run list                                  # navigateurs disponibles + cibles
 npm run bench -- --targets=local --runs=3
 ```
 
 À la fin d'une campagne, les résultats sont agrégés, un résumé est ajouté à l'historique et le dashboard est régénéré : ouvrir `dashboard/index.html` (aucun serveur nécessaire).
 
-**Sous Windows, la campagne de référence tourne sous Linux, dans WSL** (voir [Campagne sous Linux depuis Windows](#campagne-sous-linux-depuis-windows-wsl)) :
+**Sous Windows, la campagne de référence tourne sous Linux, dans WSL** (voir [Campagne sous Linux depuis Windows](#campagne-sous-linux-depuis-windows-wsl)). Utiliser `npm.cmd` plutôt que `npm` : sous PowerShell, `npm` perd le `--` qui sépare ses options de celles du benchmark (voir [Dépannage](#dépannage)).
 
 ```bash
-npm run wsl -- setup                          # une fois : Node.js, navigateurs et leurs dépendances dans WSL
-npm run wsl -- bench --targets=local --runs=3 # le dashboard Linux est recopié dans dashboard/index.html
+npm.cmd run wsl -- setup                          # une fois : Node.js, navigateurs et leurs dépendances dans WSL
+npm.cmd run wsl -- bench --targets=local --runs=3 # le dashboard Linux est recopié dans dashboard/index.html
 ```
 
 **Configuration locale** : les variables d'environnement peuvent être placées dans un fichier `.env` à la racine (ignoré par git, voir [`.env.example`](.env.example)), chargé par chaque commande `npm run` : `BENCH_CHROME_PATH`, `PLAYWRIGHT_BROWSERS_PATH`, `CAMOUFOX_INSTALL_DIR`, `LIGHTPANDA_*`.
@@ -43,7 +43,7 @@ npm run dashboard:artifact  # même page, sans enveloppe HTML, pour une publicat
 npm run list                # disponibilité des navigateurs et liste des cibles
 npm run install-browsers    # Chrome for Testing + Firefox/WebKit de Playwright (respecte PLAYWRIGHT_BROWSERS_PATH)
 npm run check-dashboard     # ouvre le dashboard généré et vérifie chaque onglet (erreurs JS, tableaux vides)
-npm run wsl -- <commande>   # depuis Windows : la même commande, sous Linux dans WSL (voir plus bas)
+npm.cmd run wsl -- <commande>  # depuis Windows : la même commande, sous Linux dans WSL (voir plus bas)
 npm test && npm run typecheck
 ```
 
@@ -69,7 +69,7 @@ npm test && npm run typecheck
 | `--dashboard` | `dashboard/index.html` | dashboard généré ; avec un autre `--results`, `<results>/dashboard.html`, pour qu'un essai n'écrase pas le dashboard principal |
 | `--clean` | — | supprime tous les résultats précédents (runs bruts, captures, débit) |
 
-Sans `--resume`, les couples (navigateur, cible) de la campagne **remplacent** leurs runs précédents : des runs 6 à 10 laissés par une campagne à 10 runs ne se mélangent pas à une nouvelle campagne à 5 runs. Les autres couples restent dans `results/raw` et dans le dashboard.
+Sans `--resume`, les couples (navigateur, cible) de la campagne **remplacent** leurs runs précédents et leurs captures, supprimés dès le démarrage : des runs 6 à 10 laissés par une campagne à 10 runs ne se mélangent pas à une nouvelle campagne à 5 runs. Les autres couples restent dans `results/raw` et dans le dashboard.
 
 ### Options de `throughput`
 
@@ -110,7 +110,7 @@ Lightpanda expose un serveur compatible CDP ; il est piloté par Puppeteer. **Il
 
 Lightpanda ne charge par défaut ni les workers ni les iframes : une page qui calcule dans un worker, ou qui affiche un challenge dans une iframe (Cloudflare Turnstile), n'afficherait jamais son résultat. L'adapter les active (`--load-resources worker --load-resources iframe`). Les images et les feuilles de style restent désactivées, comme dans la configuration par défaut de Lightpanda.
 
-**Installation sous Windows (WSL2)**, dans la distribution WSL par défaut :
+**Installation sous Windows (WSL2)**, dans la distribution WSL par défaut (`npm.cmd run wsl -- setup` l'installe aussi, au même endroit) :
 
 ```bash
 wsl -e sh -c "mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/lightpanda https://github.com/lightpanda-io/browser/releases/download/0.4.1/lightpanda-x86_64-linux && chmod a+x ~/.local/bin/lightpanda"
@@ -120,7 +120,7 @@ wsl -e sh -c "mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/lightpanda htt
 
 Sous Windows, Lightpanda garde un handicap : chaque requête traverse la VM, et sa mémoire est mesurée en USS alors que celle des autres navigateurs l'est en *private working set*. Deux façons de le réduire :
 - activer le **réseau miroir** de WSL (`networkingMode=mirrored` dans `%UserProfile%\.wslconfig`, puis `wsl --shutdown`) : Windows et WSL partagent alors `127.0.0.1`, sans passer par le NAT. Le benchmark le détecte (`wslinfo --networking-mode`) ;
-- pour une comparaison à armes égales, lancer toute la campagne **sous Linux** : `npm run wsl -- bench` (voir [Campagne sous Linux depuis Windows](#campagne-sous-linux-depuis-windows-wsl)), un runner Linux ou le workflow planifié. Tous les navigateurs y tournent alors en natif.
+- pour une comparaison à armes égales, lancer toute la campagne **sous Linux** : `npm.cmd run wsl -- bench` (voir [Campagne sous Linux depuis Windows](#campagne-sous-linux-depuis-windows-wsl)), un runner Linux ou le workflow planifié. Tous les navigateurs y tournent alors en natif.
 
 Variables optionnelles : `LIGHTPANDA_WSL_BIN` et `LIGHTPANDA_WSL_DISTRO`. `python3` doit être présent dans WSL (échantillonneur de ressources). En mode WSL, les fixtures `local://` et le proxy de comptage sont aussi servis sur l'adresse de Windows vue depuis WSL, et l'échantillonneur WSL garde la VM allumée pendant toute la campagne : son démarrage n'est jamais compté dans un temps de lancement. La version enregistrée est la vraie (`Lightpanda 0.4.1`), pas la version Chrome annoncée via CDP.
 
@@ -128,7 +128,7 @@ Variables optionnelles : `LIGHTPANDA_WSL_BIN` et `LIGHTPANDA_WSL_DISTRO`. `pytho
 
 - **puppeteer-stealth** : `puppeteer-extra-plugin-stealth` n'a plus de nouvelle version depuis 2023. C'est la référence furtive la plus répandue, pas la plus à jour.
 - **patchright** corrige le driver (fuites CDP), pas le navigateur : il lance la même build de Chrome que les autres, ce qui isole l'effet de ses correctifs.
-- **camoufox** : `npx camoufox-js fetch` télécharge le navigateur (~500 Mo) et une base GeoIP (66 Mo). `camoufox-js` embarque sa propre version de Playwright, alignée sur Camoufox, et l'adapter s'y connecte avec cette même version. Sous Windows, le placer hors d'`AppData` (voir Dépannage) : `CAMOUFOX_INSTALL_DIR=C:/Users/<vous>/.cache/camoufox` dans `.env`.
+- **camoufox** : `npx camoufox-js fetch` télécharge le navigateur (~660 Mo) et une base GeoIP (66 Mo). `camoufox-js` embarque sa propre version de Playwright, alignée sur Camoufox, et l'adapter s'y connecte avec cette même version. Sous Windows, le placer hors d'`AppData` (voir Dépannage) : `CAMOUFOX_INSTALL_DIR=C:/Users/<vous>/.cache/camoufox` dans `.env`.
 
 ## Cibles
 
@@ -216,18 +216,18 @@ La couleur identifie la **famille de moteur** (par exemple Chromium pour `playwr
 
 ## Campagne sous Linux depuis Windows (WSL)
 
-Sous Windows, un seul navigateur, Lightpanda, tourne dans la VM WSL : lui seul fait traverser la VM à ses requêtes, et sa mémoire n'est pas mesurée comme celle des autres (USS contre *private working set*). **Sous Linux, tous les navigateurs tournent en natif et sont mesurés de la même façon**, sur l'OS où tournent les scrapers en production. `npm run wsl` fait tourner le benchmark dans WSL sans quitter Windows :
+Sous Windows, un seul navigateur, Lightpanda, tourne dans la VM WSL : lui seul fait traverser la VM à ses requêtes, et sa mémoire n'est pas mesurée comme celle des autres (USS contre *private working set*). **Sous Linux, tous les navigateurs tournent en natif et sont mesurés de la même façon**, sur l'OS où tournent les scrapers en production. `npm run wsl` fait tourner le benchmark dans WSL sans quitter Windows (avec `npm.cmd`, qui garde le `--` sous PowerShell) :
 
 ```bash
-npm run wsl -- setup                           # une fois, puis après une mise à jour des dépendances
-npm run wsl -- bench --browsers=all            # n'importe quelle commande npm run, avec ses options
-npm run wsl -- throughput
-npm run wsl -- open                            # ouvre le dashboard de la campagne Linux
+npm.cmd run wsl -- setup                           # une fois, puis après une mise à jour des dépendances
+npm.cmd run wsl -- bench --browsers=all            # n'importe quelle commande npm run, avec ses options
+npm.cmd run wsl -- throughput
+npm.cmd run wsl -- open                            # ouvre le dashboard de la campagne Linux
 ```
 
 - **`setup`** installe, dans la distribution WSL par défaut : Node.js 22 (dans `~/.local`, archive officielle vérifiée), les dépendances npm, Chrome for Testing, Firefox et WebKit de Playwright, leurs bibliothèques système et leurs polices (`playwright install-deps`), Camoufox et Lightpanda. Les paquets système passent par `wsl -u root`, sans mot de passe. Chaque étape est sautée si elle est déjà faite.
 - **Chaque commande** copie d'abord l'arbre de travail Windows (fichiers suivis et non ignorés par git, plus `config/targets.local.json`) dans `~/browser-benchmark`, sur le disque de la VM : `/mnt/c` serait trop lent pour `node_modules`. `npm ci` n'est relancé que si `package-lock.json` a changé. Le `.env` Windows n'est pas copié : ses chemins sont des chemins Windows.
-- **Les runs restent dans WSL** (`~/browser-benchmark/results`) : les campagnes Windows et Linux ne se mélangent donc jamais, ni dans les runs ni dans l'historique. La campagne Linux étant la référence, `bench` et `throughput` **recopient son dashboard dans `dashboard/index.html`** côté Windows (sauf avec `--results` ou `--dashboard`). L'original reste dans `~/browser-benchmark/dashboard/index.html`, accessible via `\\wsl.localhost\<distribution>\…` ou `npm run wsl -- open`.
+- **Les runs restent dans WSL** (`~/browser-benchmark/results`) : les campagnes Windows et Linux ne se mélangent donc jamais, ni dans les runs ni dans l'historique. La campagne Linux étant la référence, `bench`, `throughput` et `dashboard` **recopient son dashboard dans `dashboard/index.html`** côté Windows (sauf avec `--results` ou `--dashboard`). L'original reste dans `~/browser-benchmark/dashboard/index.html`, accessible via `\\wsl.localhost\<distribution>\…` ou `npm.cmd run wsl -- open`.
 - **Anciennes campagnes** : `results/archive/<date>-<plateforme>/` (ignoré par git) garde leurs runs, captures, tests de débit, historique et dashboard.
 - Variables : `BENCH_WSL_DIR` (chemin Linux de la copie) et `LIGHTPANDA_WSL_DISTRO` (distribution utilisée).
 
@@ -272,7 +272,9 @@ src/
 │   └── history.ts           # résumé par campagne
 ├── fixtures/server.ts       # pages local://
 ├── config/targets.ts
-├── util/                    # process, WSL, anti-veille
+├── util/                    # process, WSL, anti-veille, timeouts
+├── env.ts                   # charge .env, avant tout le reste
+├── cli-options.ts           # options de la CLI, partagées avec npm run wsl (+ détection des options gardées par npm)
 └── cli.ts
 dashboard/
 ├── template.html
