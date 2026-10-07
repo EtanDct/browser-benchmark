@@ -4,18 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Benchmark navigateurs headless</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,600;112,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
+/* Layout: a measurement panel. One header that states the campaign, a compact filter bar, results
+   first, explanations folded until asked for. Neutrals lean toward the blue accent. */
 :root {
   color-scheme: light;
-  --page: #f9f9f7;
-  --surface-1: #fcfcfb;
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #898781;
-  --grid: #e1e0d9;
-  --axis: #c3c2b7;
-  --border: rgba(11, 11, 11, 0.10);
+  --font-display: "Archivo", "IBM Plex Sans", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+  --page: #f4f6f9;
+  --surface-1: #ffffff;
+  --surface-2: #edf0f5;
+  --text-primary: #12161c;
+  --text-secondary: #4a5361;
+  --text-muted: #7f8896;
+  --grid: #e3e7ed;
+  --axis: #c5ccd6;
+  --border: rgba(18, 22, 28, 0.09);
+  --accent: #2a6fd0;
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
@@ -28,20 +38,21 @@
   --status-good: #0ca30c;
   --status-warning: #fab219;
   --status-critical: #d03b3b;
-  --scale-max: #184f95;
-  --scale-ink-strong: #ffffff;
+  --scale-max: #2a6fd0;
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
-    --page: #0d0d0d;
-    --surface-1: #1a1a19;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #898781;
-    --grid: #2c2c2a;
-    --axis: #383835;
-    --border: rgba(255, 255, 255, 0.10);
+    --page: #0f1115;
+    --surface-1: #171a20;
+    --surface-2: #1f232b;
+    --text-primary: #eef1f5;
+    --text-secondary: #b4bcc8;
+    --text-muted: #7c8592;
+    --grid: #262b33;
+    --axis: #363c46;
+    --border: rgba(238, 241, 245, 0.09);
+    --accent: #5a9cf0;
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
@@ -50,20 +61,21 @@
     --series-6: #008300;
     --series-7: #9085e9;
     --series-8: #e66767;
-    --scale-max: #6da7ec;
-    --scale-ink-strong: #0b0b0b;
+    --scale-max: #5a9cf0;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --page: #0d0d0d;
-  --surface-1: #1a1a19;
-  --text-primary: #ffffff;
-  --text-secondary: #c3c2b7;
-  --text-muted: #898781;
-  --grid: #2c2c2a;
-  --axis: #383835;
-  --border: rgba(255, 255, 255, 0.10);
+  --page: #0f1115;
+  --surface-1: #171a20;
+  --surface-2: #1f232b;
+  --text-primary: #eef1f5;
+  --text-secondary: #b4bcc8;
+  --text-muted: #7c8592;
+  --grid: #262b33;
+  --axis: #363c46;
+  --border: rgba(238, 241, 245, 0.09);
+  --accent: #5a9cf0;
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
@@ -72,8 +84,7 @@
   --series-6: #008300;
   --series-7: #9085e9;
   --series-8: #e66767;
-  --scale-max: #6da7ec;
-  --scale-ink-strong: #0b0b0b;
+  --scale-max: #5a9cf0;
 }
 
 * { box-sizing: border-box; }
@@ -81,23 +92,47 @@ body {
   margin: 0;
   background: var(--page);
   color: var(--text-primary);
-  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 14px/1.5 var(--font-body);
 }
-main { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; }
-header h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
-.meta { color: var(--text-secondary); font-size: 13px; }
-.meta span + span::before { content: "·"; margin: 0 8px; color: var(--text-muted); }
+main { max-width: 1280px; margin: 0 auto; padding-inline: 16px; padding-block: 32px 64px; }
+header { display: grid; gap: 6px; }
+header h1 {
+  font-family: var(--font-display); font-stretch: 112%; font-size: clamp(22px, 3.4vw, 30px);
+  font-weight: 700; letter-spacing: -0.01em; line-height: 1.15; margin: 0; text-wrap: balance;
+}
+.headline { margin: 0; color: var(--text-secondary); font-size: 15px; }
+.headline b { color: var(--text-primary); font-weight: 600; }
+.meta { color: var(--text-muted); font: 12px/1.5 var(--font-data); }
+.meta span + span::before { content: "·"; margin: 0 8px; }
 
+/* Filters fold into one bar: the results come first, the 30 toggles on demand. */
 .filters {
-  display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: flex-start;
-  margin: 20px 0; padding: 12px 16px;
-  background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+  margin: 16px 0 0; padding: 10px 0;
+  background: var(--page); border-bottom: 1px solid var(--grid);
 }
 @media (min-width: 900px) {
   .filters { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; }
 }
+.filters > summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  cursor: pointer; list-style: none; color: var(--text-secondary); font-size: 13px;
+}
+.filters > summary::-webkit-details-marker { display: none; }
+.filters > summary::before {
+  content: ""; width: 7px; height: 7px; border: solid var(--text-muted); border-width: 0 1.5px 1.5px 0;
+  transform: rotate(-45deg); transition: transform .15s; margin-right: 2px;
+}
+.filters[open] > summary::before { transform: rotate(45deg); }
+.filters > summary .label { color: var(--text-primary); font-weight: 600; }
+.filters > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.filter-body { display: grid; gap: 12px; padding-top: 12px; }
 .filter-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.filter-group > .label { color: var(--text-secondary); font-size: 12px; font-weight: 600; margin-right: 4px; text-transform: uppercase; letter-spacing: .04em; }
+.filter-group > .label { color: var(--text-muted); font-size: 11px; font-weight: 600; margin-right: 4px; text-transform: uppercase; letter-spacing: .06em; min-width: 82px; }
+.link-button {
+  font: inherit; font-size: 12px; color: var(--accent); background: none; border: 0; padding: 2px 4px; cursor: pointer;
+}
+.link-button:hover { text-decoration: underline; }
+.link-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 .chip {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px;
@@ -105,27 +140,39 @@ header h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
 }
 .chip input { position: absolute; opacity: 0; pointer-events: none; }
 .chip:has(input:not(:checked)) { color: var(--text-muted); opacity: .6; }
-.chip:has(input:focus-visible) { outline: 2px solid var(--series-1); outline-offset: 2px; }
+.chip:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 
-section { margin-top: 28px; }
-section > h2 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
-section > p.hint { margin: 0 0 12px; color: var(--text-secondary); font-size: 13px; }
-.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+section { margin-top: 40px; min-width: 0; }
+section > h2 {
+  font-family: var(--font-display); font-stretch: 112%; font-size: 17px; font-weight: 600;
+  letter-spacing: -0.005em; margin: 0 0 4px; text-wrap: balance;
+}
+section > p.hint { margin: 0 0 14px; color: var(--text-secondary); font-size: 13px; max-width: 75ch; }
+/* Long explanations stay one click away instead of opening every section. */
+.explain { margin: -8px 0 14px; font-size: 13px; color: var(--text-secondary); max-width: 80ch; }
+.explain > summary { cursor: pointer; color: var(--accent); width: fit-content; }
+.explain > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.explain p, .explain ul { margin: 8px 0 0; }
+.explain ul { padding-left: 18px; display: grid; gap: 4px; }
+.after-table { margin: 12px 0 0; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 16px; min-width: 0; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); gap: 16px; }
 .chart-box { position: relative; height: 340px; }
 .chart-box.short { height: 260px; }
 .card h3 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
-.card .sub { color: var(--text-secondary); font-size: 12px; margin: 0 0 10px; }
+.card .sub { color: var(--text-muted); font-size: 12px; margin: 0 0 10px; }
 
 .table-wrap { overflow-x: auto; }
+.card.table-wrap { padding: 4px 8px; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
-th, td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
-th { color: var(--text-secondary); font-weight: 600; font-size: 12px; position: sticky; top: 0; background: var(--surface-1); }
+th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+th { color: var(--text-muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; position: sticky; top: 0; background: var(--surface-1); }
 th:first-child, td:first-child, td.left, th.left { text-align: left; }
 td { font-variant-numeric: tabular-nums; }
 .name { display: inline-flex; align-items: center; gap: 8px; }
-.version { color: var(--text-muted); font-size: 12px; }
+.version { color: var(--text-muted); font: 11px var(--font-data); }
 .muted { color: var(--text-muted); }
 .err { color: var(--text-secondary); max-width: 360px; overflow: hidden; text-overflow: ellipsis; text-align: left; }
 
@@ -147,49 +194,56 @@ select {
 }
 .empty { color: var(--text-muted); padding: 32px 0; text-align: center; }
 
-.tabs { display: flex; gap: 4px; margin-top: 20px; border-bottom: 1px solid var(--grid); }
+.tabs { display: flex; gap: 2px; margin-top: 24px; border-bottom: 1px solid var(--grid); overflow-x: auto; }
 .tabs button {
-  font: inherit; font-weight: 600; color: var(--text-secondary); background: none; border: 0;
-  padding: 8px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer;
+  font: inherit; font-weight: 500; color: var(--text-secondary); background: none; border: 0;
+  padding: 10px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; white-space: nowrap;
 }
-.tabs button[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--series-1); }
-.tabs button:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; border-radius: 4px; }
+.tabs button:hover { color: var(--text-primary); }
+.tabs button[aria-selected="true"] { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--accent); }
+.tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
 
 .ranking-top { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 0 16px; }
 .ranking-top > section { display: flex; flex-direction: column; }
 .ranking-top .card { flex: 1; }
-.winner-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.winner-name { font-size: 24px; font-weight: 700; display: inline-flex; align-items: center; gap: 10px; }
+.winner-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.winner-name { font-family: var(--font-display); font-stretch: 112%; font-size: 28px; font-weight: 700; display: inline-flex; align-items: center; gap: 10px; }
 .winner-name .swatch { width: 14px; height: 14px; }
-.winner-score { font-size: 24px; font-weight: 600; color: var(--text-secondary); }
-.winner-score small { font-size: 14px; font-weight: 400; }
+.winner-score { font-family: var(--font-display); font-stretch: 112%; font-size: 28px; font-weight: 600; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.winner-score small { font-family: var(--font-body); font-size: 14px; font-weight: 400; color: var(--text-muted); }
 .winner-sub { color: var(--text-secondary); margin: 4px 0 14px; }
-.axis-winners { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px 16px; margin: 0; padding: 0; list-style: none; }
-.axis-winners li { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
-.axis-winners .axis { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-
-.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
-.presets button {
-  font: inherit; font-size: 13px; color: var(--text-primary); background: none; cursor: pointer;
-  border: 1px solid var(--border); border-radius: 999px; padding: 3px 12px;
+.axis-winners {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px 16px;
+  margin: 0; padding: 14px 0 0; list-style: none; border-top: 1px solid var(--grid);
 }
-.presets button[aria-pressed="true"] { border-color: var(--series-1); color: var(--series-1); font-weight: 600; }
+.axis-winners li { display: flex; flex-direction: column; gap: 2px; font-size: 13px; min-width: 0; }
+.axis-winners .axis { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+
+.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.presets button {
+  font: inherit; font-size: 13px; color: var(--text-secondary); background: var(--surface-2); cursor: pointer;
+  border: 1px solid transparent; border-radius: 999px; padding: 4px 12px;
+}
+.presets button:hover { color: var(--text-primary); }
+.presets button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--surface-1); font-weight: 600; }
+.presets button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .weights { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 20px; }
 .weights label { display: grid; grid-template-columns: 90px 1fr 18px; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
-.weights input[type="range"] { width: 100%; accent-color: var(--series-1); }
+.weights input[type="range"] { width: 100%; accent-color: var(--accent); }
 .weights output { color: var(--text-primary); font-variant-numeric: tabular-nums; text-align: right; }
 
-table.ranking td.score { text-align: center; padding: 6px 8px; min-width: 88px; border-bottom: 2px solid var(--surface-1); }
+/* Heat-map kept light: the strongest cell is a mid tint, so the numbers stay the figure. */
+table.ranking td.score { text-align: center; padding: 6px 8px; min-width: 84px; border-bottom: 2px solid var(--surface-1); border-right: 2px solid var(--surface-1); }
 table.ranking td.score .v { display: block; font-size: 15px; font-weight: 600; }
-table.ranking td.score .raw { display: block; font-size: 11px; opacity: .85; }
-table.ranking td.score.best .v::after { content: " ★"; font-size: 12px; }
+table.ranking td.score .raw { display: block; font-size: 11px; color: var(--text-secondary); }
+table.ranking td.score.best .v::after { content: " ★"; font-size: 12px; color: var(--accent); }
 table.ranking th.axis { text-align: center; }
 table.ranking td:nth-child(2), table.ranking th:nth-child(2) { text-align: left; }
 table.ranking td.rank { color: var(--text-muted); width: 28px; }
 table.ranking tr.first td { font-weight: 600; }
 .global { display: flex; align-items: center; gap: 8px; min-width: 150px; }
 .global .bar { flex: 1; height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; }
-.global .bar span { display: block; height: 100%; background: var(--series-1); border-radius: 4px; }
+.global .bar span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
 .global b { width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
 .note { margin-top: 10px; }
 .stack-top { margin-top: 16px; }
@@ -197,7 +251,7 @@ table.ranking tr.first td { font-weight: 600; }
 .empty-state p { margin: 0; color: var(--text-secondary); }
 .empty-state .empty-title { color: var(--text-primary); font-weight: 600; margin-bottom: 6px; }
 .weights label.unmeasured { opacity: .5; }
-code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; background: var(--grid); padding: 1px 5px; border-radius: 4px; }
+code { font-family: var(--font-data); font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
 .tag {
   font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
   color: var(--text-secondary); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px;
@@ -212,22 +266,24 @@ th button.sort {
   font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; white-space: nowrap;
 }
 th[aria-sort="ascending"] button.sort, th[aria-sort="descending"] button.sort { color: var(--text-primary); }
-th button.sort:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; border-radius: 3px; }
+th button.sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 .pager { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; font-size: 13px; }
 .pager .muted { margin-right: auto; }
 .pager button {
   font: inherit; min-width: 32px; padding: 4px 10px; cursor: pointer; color: var(--text-primary);
   background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px;
 }
-.pager button[aria-current="page"] { border-color: var(--series-1); color: var(--series-1); font-weight: 600; }
+.pager button[aria-current="page"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .pager button:disabled { opacity: .4; cursor: default; }
-footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--grid); color: var(--text-muted); font: 12px var(--font-data); }
+@media (prefers-reduced-motion: reduce) { .filters > summary::before { transition: none; } }
 </style>
 </head>
 <body>
 <main>
   <header>
     <h1>Benchmark navigateurs headless</h1>
+    <p class="headline" id="headline"></p>
     <div class="meta" id="meta"></div>
   </header>
 
@@ -238,10 +294,13 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     <button type="button" role="tab" id="tab-history" aria-controls="view-history" aria-selected="false">Historique</button>
   </nav>
 
-  <div class="filters" role="group" aria-label="Filtres">
-    <div class="filter-group" id="browser-filters"><span class="label">Navigateurs</span></div>
-    <div class="filter-group" id="target-filters"><span class="label">Cibles</span></div>
-  </div>
+  <details class="filters" id="filters">
+    <summary><span class="label">Filtres</span> <span id="filter-summary"></span></summary>
+    <div class="filter-body" role="group" aria-label="Filtres">
+      <div class="filter-group" id="browser-filters"><span class="label">Navigateurs</span></div>
+      <div class="filter-group" id="target-filters"><span class="label">Cibles</span></div>
+    </div>
+  </details>
 
   <div id="view-ranking" role="tabpanel" aria-labelledby="tab-ranking">
     <div class="ranking-top">
@@ -262,23 +321,39 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
     <section>
       <h2>Comparaison croisée</h2>
-      <p class="hint">Chaque case est un score sur 100 (plus foncé = meilleur), avec la valeur mesurée en dessous. Performance (vitesse, démarrage, mémoire au pic, secondes de CPU, réseau) : score relatif au meilleur navigateur, cible par cible (2× plus lent que le meilleur = 50), puis moyenné sur les cibles. Anti-bot, fidélité et fiabilité : taux absolus. Vitesse, mémoire, CPU, réseau et fidélité ne comptent que les pages de performance et locales : sur une page anti-bot, celui qui passe le challenge charge la vraie page, plus lourde, et serait pénalisé. Survoler une case pour le détail.</p>
+      <p class="hint">Un score sur 100 par axe, plus foncé quand il est meilleur, avec la valeur mesurée en dessous. Survoler une case pour le détail.</p>
+      <details class="explain">
+        <summary>Comment les scores sont calculés</summary>
+        <p>Performance (vitesse, démarrage, mémoire au pic, secondes de CPU, réseau) : score relatif au meilleur navigateur, cible par cible (2× plus lent que le meilleur = 50), puis moyenné sur les cibles. Anti-bot, fidélité et fiabilité : taux absolus.</p>
+        <p>Vitesse, mémoire, CPU, réseau et fidélité ne comptent que les pages de performance et locales : sur une page anti-bot, celui qui passe le challenge charge la vraie page, plus lourde, et serait pénalisé.</p>
+      </details>
       <div class="card table-wrap"><table id="ranking-table" class="ranking"></table></div>
-      <p class="hint note" id="ranking-notes"></p>
+      <details class="explain after-table">
+        <summary>Notes sur ce classement</summary>
+        <ul id="ranking-notes"></ul>
+      </details>
     </section>
   </div>
 
   <div id="view-details" role="tabpanel" aria-labelledby="tab-details" hidden>
   <section>
     <h2>Vue d'ensemble</h2>
-    <p class="hint">Agrégé sur les cibles sélectionnées ; chargement, RAM, CPU, réseau et fidélité sur les pages de performance et locales seulement. Temps de chargement = moyenne des médianes par cible ; CPU = secondes de processeur consommées par page ; mémoire = <span id="mem-metric"></span>, somme sur tout l'arbre de process.</p>
+    <p class="hint">Une ligne par navigateur, sur les cibles sélectionnées.</p>
+    <details class="explain">
+      <summary>Ce que mesure chaque colonne</summary>
+      <p>Chargement, RAM, CPU, réseau et fidélité portent sur les pages de performance et locales seulement. Temps de chargement = moyenne des médianes par cible ; CPU = secondes de processeur consommées par page ; mémoire = <span id="mem-metric"></span>, somme sur tout l'arbre de process.</p>
+    </details>
     <div class="card table-wrap"><table id="summary-table"></table></div>
   </section>
 
   <section>
     <h2>Anti-bot</h2>
     <p class="antibot-summary" id="antibot-summary"></p>
-    <p class="hint">Chaque case : le <strong>verdict</strong> de la page (✓ passé, ✕ repéré ou bloqué, ! sans verdict : le script de détection n'a pas tourné dans ce navigateur), puis, sur les pages qui détaillent leurs tests (sannysoft, CreepJS, deviceandbrowserinfo), la <strong>barre des contrôles réussis</strong>. Un seul contrôle raté suffit pour être repéré : on peut donc réussir 87 % des contrôles et prendre quand même une croix. Browserscan et Cloudflare ne répondent que oui ou non. Survoler une case pour le détail des runs.</p>
+    <p class="hint">✓ passé, ✕ repéré ou bloqué, ! sans verdict. La barre donne la part des contrôles réussis. Survoler une case pour le détail des runs.</p>
+    <details class="explain">
+      <summary>Comment lire ce tableau</summary>
+      <p>« Sans verdict » : le script de détection n'a pas tourné dans ce navigateur. La barre n'apparaît que sur les pages qui détaillent leurs tests (sannysoft, CreepJS, deviceandbrowserinfo). Un seul contrôle raté suffit pour être repéré : on peut réussir 87 % des contrôles et prendre quand même une croix. Browserscan et Cloudflare ne répondent que oui ou non.</p>
+    </details>
     <div class="card table-wrap"><table id="antibot-table"></table></div>
   </section>
 
@@ -323,7 +398,11 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
   <section>
     <h2>Détail navigateur × cible</h2>
-    <p class="hint">Contenu = éléments que la page locale annonce devoir contenir, retrouvés après chargement (par exemple les 500 lignes construites en JS). DOM similaire = similarité du nombre d'éléments par balise avec le DOM sur lequel les moteurs s'accordent (un vote par moteur : Chromium, Gecko, WebKit, Lightpanda). Pas de fidélité sur les pages anti-bot.</p>
+    <p class="hint">Chaque couple navigateur × cible, triable par colonne.</p>
+    <details class="explain">
+      <summary>Contenu et DOM similaire</summary>
+      <p>Contenu = éléments que la page locale annonce devoir contenir, retrouvés après chargement (par exemple les 500 lignes construites en JS). DOM similaire = similarité du nombre d'éléments par balise avec le DOM sur lequel les moteurs s'accordent (un vote par moteur : Chromium, Gecko, WebKit, Lightpanda). Pas de fidélité sur les pages anti-bot.</p>
+    </details>
     <div class="card">
       <div class="table-wrap"><table id="detail-table"></table></div>
       <nav class="pager" id="detail-pager" aria-label="Pagination du détail"></nav>
@@ -334,7 +413,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   <div id="view-throughput" role="tabpanel" aria-labelledby="tab-throughput" hidden>
     <section>
       <h2>Débit en parallèle</h2>
-      <p class="hint">Un seul navigateur, N pages qui se partagent une file de chargements (cible : <span id="tp-target"></span>). Montre combien de pages par minute il tient, et ce que coûte en mémoire chaque page ouverte en plus. Se lance avec <code>npm run throughput</code>.</p>
+      <p class="hint">N pages en parallèle dans un seul navigateur, sur une file de chargements commune (cible : <span id="tp-target"></span>). Pages par minute tenues, et mémoire coûtée par chaque page ouverte en plus.</p>
       <div class="card empty-state" id="tp-empty" hidden>
         <p class="empty-title">Pas encore de test de débit dans ces résultats</p>
         <p>Le test ouvre plusieurs pages en parallèle dans un même navigateur (1, 2, 4 puis 8) et mesure les pages par minute et la mémoire. Il s'ajoute à la fin d'une campagne complète, ou se lance seul avec <code>npm run throughput</code>, puis <code>npm run dashboard</code>.</p>
@@ -541,13 +620,23 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
 
   function renderMeta() {
     var env = data.environment || {};
+    // The campaign in one sentence; the machine details stay below, in small print.
+    var adapters = new Set(data.browsers.map(function (b) { return (metaOf[b] || {}).adapter || b; }));
+    var failed = data.cells.reduce(function (s, c) { return s + (c.runs - c.successes); }, 0);
+    var generated = new Date(data.generatedAt);
+    document.getElementById('headline').replaceChildren(
+      'Campagne du ' + generated.toLocaleDateString('fr-FR') + (env.platform ? ' sous ' + osName(env) : '') + ' : ',
+      el('b', { text: fmt(data.runCount, 0) + ' runs' }), ', ',
+      el('b', { text: adapters.size + ' navigateurs' }), adapters.size !== data.browsers.length ? ' (' + data.browsers.length + ' variantes), ' : ', ',
+      el('b', { text: data.targets.length + ' cibles' }), ', ',
+      el('b', { text: failed ? fmt(failed, 0) + ' échec' + (failed > 1 ? 's' : '') : 'aucun échec' }), '.'
+    );
     var meta = document.getElementById('meta');
     [
-      'Généré le ' + new Date(data.generatedAt).toLocaleString('fr-FR'),
-      data.runCount + ' runs',
-      env.platform ? osName(env) + ' ' + env.osRelease + ' (' + env.arch + ')' : null,
+      'généré à ' + generated.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
       env.cpuModel ? env.cpuModel + ' × ' + env.cpuCount : null,
       env.totalMemBytes ? fmt(env.totalMemBytes / Math.pow(2, 30), 0, ' Go RAM') : null,
+      env.osRelease ? env.osRelease + ' (' + env.arch + ')' : null,
       env.nodeVersion ? 'Node ' + env.nodeVersion : null
     ].filter(Boolean).forEach(function (text) { meta.appendChild(el('span', { text: text })); });
     var METRIC_LABELS = {
@@ -561,19 +650,41 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     document.getElementById('footer').textContent = 'Généré depuis results/aggregated.json — régénérer avec npm run dashboard.';
   }
 
+  function renderFilterSummary() {
+    var b = state.browsers.size, t = state.targets.size;
+    document.getElementById('filter-summary').textContent =
+      (b === data.browsers.length ? 'tous les navigateurs' : b + ' navigateur' + (b > 1 ? 's' : '') + ' sur ' + data.browsers.length) + ' · ' +
+      (t === data.targets.length ? 'toutes les cibles' : t + ' cible' + (t > 1 ? 's' : '') + ' sur ' + data.targets.length);
+  }
+
   function renderFilters() {
-    var bf = document.getElementById('browser-filters');
-    data.browsers.forEach(function (b) {
-      var input = el('input', { type: 'checkbox', checked: '' });
-      input.addEventListener('change', function () { input.checked ? state.browsers.add(b) : state.browsers.delete(b); detailPage = 0; update(); });
-      bf.appendChild(el('label', { class: 'chip' }, [input, swatch(b), b]));
+    function group(containerId, items, set, chipOf) {
+      var container = document.getElementById(containerId);
+      var inputs = items.map(function (item) {
+        var input = el('input', { type: 'checkbox', checked: '' });
+        input.addEventListener('change', function () { input.checked ? set.add(item.key) : set.delete(item.key); filtersChanged(); });
+        container.appendChild(chipOf(item, input));
+        return input;
+      });
+      function setAll(on) {
+        items.forEach(function (item, i) { inputs[i].checked = on; on ? set.add(item.key) : set.delete(item.key); });
+        filtersChanged();
+      }
+      var all = el('button', { type: 'button', class: 'link-button', text: 'Tous' });
+      var none = el('button', { type: 'button', class: 'link-button', text: 'Aucun' });
+      all.addEventListener('click', function () { setAll(true); });
+      none.addEventListener('click', function () { setAll(false); });
+      container.appendChild(all);
+      container.appendChild(none);
+    }
+    function filtersChanged() { detailPage = 0; renderFilterSummary(); update(); }
+    group('browser-filters', data.browsers.map(function (b) { return { key: b }; }), state.browsers, function (item, input) {
+      return el('label', { class: 'chip' }, [input, swatch(item.key), item.key]);
     });
-    var tf = document.getElementById('target-filters');
-    data.targets.forEach(function (t) {
-      var input = el('input', { type: 'checkbox', checked: '' });
-      input.addEventListener('change', function () { input.checked ? state.targets.add(t.name) : state.targets.delete(t.name); detailPage = 0; update(); });
-      tf.appendChild(el('label', { class: 'chip', title: t.group + ' — ' + t.url }, [input, t.name]));
+    group('target-filters', data.targets.map(function (t) { return { key: t.name, target: t }; }), state.targets, function (item, input) {
+      return el('label', { class: 'chip', title: item.target.group + ' — ' + item.target.url }, [input, item.key]);
     });
+    renderFilterSummary();
   }
 
   // ---------- tables ----------
@@ -1166,11 +1277,11 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
   }
 
   function scoreCellStyle(score) {
-    // One-hue sequential scale mixed into the surface; ink flips once the fill gets dark enough.
-    var mix = Math.round(8 + 0.82 * score);
+    // One-hue sequential scale mixed into the surface, capped at a mid tint so the ink never flips.
+    var mix = Math.round(4 + 0.5 * score);
     return {
       background: 'color-mix(in srgb, var(--scale-max) ' + mix + '%, var(--surface-1))',
-      color: mix >= 62 ? 'var(--scale-ink-strong)' : 'var(--text-primary)'
+      color: 'var(--text-primary)'
     };
   }
 
@@ -1200,7 +1311,7 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
         el('span', { class: 'winner-name' }, [swatch(w.browser), w.browser]),
         el('span', { class: 'winner-score' }, [fmt(w.total, 0), el('small', { text: ' / 100' })])
       ]));
-      winnerBox.appendChild(el('p', { class: 'winner-sub', text: (others.length ? 'devant ' + others.join(' et ') + ' · ' : '') + ranking.targets.length + ' cibles, ' + runs + ' runs' }));
+      winnerBox.appendChild(el('p', { class: 'winner-sub', text: (others.length ? 'devant ' + others.join(' et ') + ' · ' : '') + ranking.targets.length + ' cibles, ' + fmt(runs, 0) + ' runs' }));
       var stats = boot[w.browser];
       if (stats && rows.length > 1) {
         var runnerUp = rows.slice(1).map(function (r) { return { browser: r.browser, share: boot[r.browser] ? boot[r.browser].firstShare : 0 }; })
@@ -1279,7 +1390,10 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     }
     notes.push('Tous les drivers Chromium (Puppeteer, Playwright, Selenium, variantes furtives) lancent la même build de Chrome : les écarts entre eux viennent du driver.');
     notes.push('★ = meilleur sur l’axe (pas d’étoile en cas d’égalité). Un axe à poids 0 est grisé et ne compte pas dans le score global ; « n/d » = pas mesuré pour ce navigateur, l’axe est alors ignoré dans son score.');
-    document.getElementById('ranking-notes').textContent = notes.join(' ');
+    document.getElementById('ranking-notes').replaceChildren.apply(
+      document.getElementById('ranking-notes'),
+      notes.map(function (n) { return el('li', { text: n }); })
+    );
   }
 
   // ---------- throughput ----------
@@ -1452,6 +1566,8 @@ footer { margin-top: 40px; color: var(--text-muted); font-size: 12px; }
     renderDetail();
   }
 
+  // Charts use the page's body face instead of Chart.js's default Helvetica.
+  if (typeof Chart !== 'undefined') Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
   renderMeta();
   renderFilters();
   renderWeights();
