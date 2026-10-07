@@ -52,7 +52,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      # Puppeteer's postinstall downloads Chrome for Testing (npm ci takes ~12 s): a stalled download
+      # once hung it for 9 minutes before failing. Bounded and retried, clearing the half-downloaded
+      # build Puppeteer would otherwise refuse to complete.
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            timeout --kill-after=10 180 npm ci && exit 0
+            echo "::warning::npm ci failed or stalled (attempt $attempt of 3)"
+            rm -rf "${PUPPETEER_CACHE_DIR:-$HOME/.cache/puppeteer}"
+          done
+          exit 1
       # Chrome for Testing (every Chromium driver) comes with npm ci; chromium here only pulls its system deps.
       - run: npx playwright install --with-deps chromium firefox webkit
       # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor, which Chrome's sandbox needs.
