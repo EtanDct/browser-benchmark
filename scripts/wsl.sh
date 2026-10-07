@@ -10,7 +10,7 @@
 set -euo pipefail
 
 NODE_MAJOR=22
-LIGHTPANDA_VERSION=0.4.1
+LIGHTPANDA_VERSION=1.0.0
 NODE_DIR="$HOME/.local/lib/nodejs"
 # Linux tools first: WSL appends the Windows PATH, whose npm would run the Windows Node.js.
 export PATH="$NODE_DIR/bin:$HOME/.local/bin:$PATH"
@@ -97,13 +97,16 @@ case "$step" in
     else
       npx camoufox-js fetch
     fi
-    if [ -x "$HOME/.local/bin/lightpanda" ]; then
-      echo "Lightpanda $("$HOME/.local/bin/lightpanda" version) already installed"
+    # Pinned release: an older binary is replaced, so every campaign measures the same build.
+    installed=$("$HOME/.local/bin/lightpanda" version 2>/dev/null || true)
+    if [ "$installed" = "$LIGHTPANDA_VERSION" ]; then
+      echo "Lightpanda $installed already installed"
     else
       mkdir -p "$HOME/.local/bin"
-      curl -fsSL -o "$HOME/.local/bin/lightpanda" "https://github.com/lightpanda-io/browser/releases/download/$LIGHTPANDA_VERSION/lightpanda-x86_64-linux"
-      chmod a+x "$HOME/.local/bin/lightpanda"
-      echo "Lightpanda $("$HOME/.local/bin/lightpanda" version) installed"
+      curl -fsSL -o "$HOME/.local/bin/lightpanda.download" "https://github.com/lightpanda-io/browser/releases/download/$LIGHTPANDA_VERSION/lightpanda-x86_64-linux"
+      chmod a+x "$HOME/.local/bin/lightpanda.download"
+      mv "$HOME/.local/bin/lightpanda.download" "$HOME/.local/bin/lightpanda"
+      echo "Lightpanda $("$HOME/.local/bin/lightpanda" version) installed${installed:+ (was $installed)}"
     fi
     ;;
 
