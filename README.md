@@ -113,7 +113,7 @@ Lightpanda ne charge par défaut ni les workers ni les iframes : une page qui ca
 **Installation sous Windows (WSL2)**, dans la distribution WSL par défaut (`npm.cmd run wsl -- setup` l'installe aussi, au même endroit) :
 
 ```bash
-wsl -e sh -c "mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/lightpanda https://github.com/lightpanda-io/browser/releases/download/0.4.1/lightpanda-x86_64-linux && chmod a+x ~/.local/bin/lightpanda"
+wsl -e sh -c "mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/lightpanda https://github.com/lightpanda-io/browser/releases/download/1.0.0/lightpanda-x86_64-linux && chmod a+x ~/.local/bin/lightpanda"
 ```
 
 **Temps de lancement.** Lightpanda écoute sur son port environ 40 ms après son lancement : le port est donc sondé toutes les 5 ms, sinon on mesurerait surtout l'intervalle de sondage. Sous Windows, `wsl.exe` coûte à lui seul environ 350 ms et la redirection de port de WSL ajoute encore du retard : mesuré depuis Windows, le lancement dépassait 700 ms. Le démarrage est donc chronométré **dans la VM**, du lancement du binaire à l'ouverture de son port, puis la connexion CDP est ajoutée depuis Windows (environ 60 ms au total).
@@ -122,7 +122,7 @@ Sous Windows, Lightpanda garde un handicap : chaque requête traverse la VM, et 
 - activer le **réseau miroir** de WSL (`networkingMode=mirrored` dans `%UserProfile%\.wslconfig`, puis `wsl --shutdown`) : Windows et WSL partagent alors `127.0.0.1`, sans passer par le NAT. Le benchmark le détecte (`wslinfo --networking-mode`) ;
 - pour une comparaison à armes égales, lancer toute la campagne **sous Linux** : `npm.cmd run wsl -- bench` (voir [Campagne sous Linux depuis Windows](#campagne-sous-linux-depuis-windows-wsl)), un runner Linux ou le workflow planifié. Tous les navigateurs y tournent alors en natif.
 
-Variables optionnelles : `LIGHTPANDA_WSL_BIN` et `LIGHTPANDA_WSL_DISTRO`. `python3` doit être présent dans WSL (échantillonneur de ressources). En mode WSL, les fixtures `local://` et le proxy de comptage sont aussi servis sur l'adresse de Windows vue depuis WSL, et l'échantillonneur WSL garde la VM allumée pendant toute la campagne : son démarrage n'est jamais compté dans un temps de lancement. La version enregistrée est la vraie (`Lightpanda 0.4.1`), pas la version Chrome annoncée via CDP.
+Variables optionnelles : `LIGHTPANDA_WSL_BIN` et `LIGHTPANDA_WSL_DISTRO`. `python3` doit être présent dans WSL (échantillonneur de ressources). En mode WSL, les fixtures `local://` et le proxy de comptage sont aussi servis sur l'adresse de Windows vue depuis WSL, et l'échantillonneur WSL garde la VM allumée pendant toute la campagne : son démarrage n'est jamais compté dans un temps de lancement. La version enregistrée est la vraie (`Lightpanda 1.0.0`), pas la version Chrome annoncée via CDP.
 
 ### Variantes furtives
 

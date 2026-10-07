@@ -70,7 +70,7 @@ jobs:
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
       - name: Install Lightpanda (pinned release)
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/lightpanda" https://github.com/lightpanda-io/browser/releases/download/0.4.1/lightpanda-x86_64-linux
+          curl -fsSL -o "$RUNNER_TEMP/lightpanda" https://github.com/lightpanda-io/browser/releases/download/1.0.0/lightpanda-x86_64-linux
           chmod a+x "$RUNNER_TEMP/lightpanda"
           echo "LIGHTPANDA_BIN=$RUNNER_TEMP/lightpanda" >> "$GITHUB_ENV"
       - name: Cache Camoufox
